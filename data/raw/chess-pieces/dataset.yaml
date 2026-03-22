@@ -1,4 +1,4 @@
-path: C:/Users/PC/chess-ecosystem/data/raw/chess-pieces
+path: data/raw/chess-pieces
 train: train/images
 val: valid/images
 test: test/images
