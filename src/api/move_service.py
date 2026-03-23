@@ -30,12 +30,20 @@ class MoveService:
                 print(f"  [MoveService] No model for bracket {bracket} — skipping.")
                 continue
             checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+
+            # Fix key mismatch between Colab model (policy) and local model (policy_head)
+            state_dict = checkpoint["state_dict"]
+            fixed = {}
+            for k, v in state_dict.items():
+                new_key = k.replace("policy.", "policy_head.")
+                fixed[new_key] = v
+
             model = ChessResNet()
-            model.load_state_dict(checkpoint["state_dict"])
+            model.load_state_dict(fixed)
             model.eval()
             self.models[bracket] = model
             print(f"  [MoveService] Loaded Elo {bracket} "
-                  f"(val_acc={checkpoint.get('val_acc', '?'):.1f}%)")
+                    f"(val_acc={checkpoint.get('val_acc', '?'):.1f}%)")
 
         if not self.models:
             raise RuntimeError("No trained models found. Run train_behavioral.py first.")
