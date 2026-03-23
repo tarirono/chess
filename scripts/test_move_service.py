@@ -45,14 +45,3 @@ for pos in positions:
 
 print(f"\n{'='*55}")
 print("Move service working correctly.")
-
-# ```
-
-# Everything is ready and waiting. When training finishes, just run:
-# ```
-# python scripts/test_move_service.py
-# ```
-
-# And to start the API server:
-# ```
-# uvicorn src.api.app:app --reload --port 8000
