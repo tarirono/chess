@@ -1,4 +1,4 @@
-# Intelligent Chess Ecosystem — PFE 2025
+# Intelligent Chess Ecosystem — PFE 2026
 
 An integrated hardware-software platform that uses Edge AI to digitize physical chess games, match players against a human-like AI bot adapted to their skill level, and track their tactical development through a knowledge graph.
 
@@ -130,7 +130,7 @@ python scripts/train_behavioral.py
 
 ~9 hours on CPU. Trains 3 ResNet models (9.27M parameters each) via behavioral cloning.
 
-### Train on Google Colab (recommended — 35 min)
+### Train on Google Colab (recommended — 59 min)
 
 Upload `data/processed/lichess/games_*.jsonl` to Colab and run the provided notebook. Achieved results:
 
@@ -244,7 +244,7 @@ Model weights are not included in this repository due to file size.
 | Bot val accuracy (Elo 1600) | 27.5% |
 | Motion detection CPU saving | 96% |
 | Training time Phase A (CPU) | 2.1 hours |
-| Training time Phase B (GPU) | ~35 minutes |
+| Training time Phase B (GPU) | ~59 minutes |
 
 ---
 
