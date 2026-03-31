@@ -1,5 +1,6 @@
 from ultralytics import YOLO
 from pathlib import Path
+import numpy as np
 
 WEIGHTS_PATH = Path("data/models/chess_nano_v1/best.pt")
 
@@ -9,6 +10,7 @@ CLASS_NAMES = [
     "white-king", "white-knight", "white-pawn", "white-queen", "white-rook"
 ]
 
+
 class PieceDetector:
     def __init__(self, weights: Path = WEIGHTS_PATH, conf: float = 0.4):
         if not weights.exists():
@@ -17,13 +19,28 @@ class PieceDetector:
         self.conf = conf
         print(f"PieceDetector loaded — weights: {weights}")
 
-    def detect(self, image_path) -> list[dict]:
+    def detect(self, source) -> list[dict]:
         """
         Run inference on an image.
-        Returns list of dicts:
-          { "label": str, "conf": float, "box": [x1,y1,x2,y2] }
+
+        Args:
+            source: file path (str | Path) OR a numpy BGR frame from OpenCV.
+                    Passing a numpy array avoids any disk I/O, which was the
+                    cause of the race condition in VisionLoop.
+
+        Returns:
+            List of dicts: { "label": str, "conf": float, "box": [x1,y1,x2,y2] }
         """
-        results = self.model(str(image_path), conf=self.conf, verbose=False)
+        # BUG FIX: accept numpy arrays directly so VisionLoop never has to
+        # write a temp file. Ultralytics YOLO supports np.ndarray as source.
+        if isinstance(source, (str, Path)):
+            inp = str(source)
+        elif isinstance(source, np.ndarray):
+            inp = source          # passed straight to Ultralytics
+        else:
+            raise TypeError(f"Unsupported source type: {type(source)}")
+
+        results = self.model(inp, conf=self.conf, verbose=False)
         detections = []
         for r in results:
             for box in r.boxes:

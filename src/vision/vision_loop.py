@@ -22,7 +22,6 @@ class VisionLoop:
         self.camera_index = camera_index
         self.show_preview = show_preview
 
-        # Load components
         self.localizer  = BoardLocalizer()
         self.detector   = PieceDetector(conf=0.45)
         self.motion     = MotionDetector(
@@ -30,7 +29,6 @@ class VisionLoop:
             stability_frames=8
         )
 
-        # Board state tracking
         self.board      = chess.Board()
         self.prev_fen   = None
         self.move_count = 0
@@ -38,14 +36,16 @@ class VisionLoop:
         print("VisionLoop initialised.")
 
     def _frame_to_fen(self, frame) -> str | None:
-        """Run full detection pipeline on a single frame."""
-        # Save frame temporarily
-        tmp_path = Path("data/raw/_tmp_frame.jpg")
-        cv2.imwrite(str(tmp_path), frame)
-
+        """
+        Run full detection pipeline on a single frame.
+        Passes the numpy array directly to YOLO — no temp file written.
+        """
         h, w = frame.shape[:2]
 
-        detections = self.detector.detect(tmp_path)
+        # BUG FIX: Ultralytics accepts numpy arrays directly.
+        # Previously wrote to _tmp_frame.jpg causing a race condition when
+        # inference is slower than the motion trigger rate.
+        detections = self.detector.detect(frame)
         if not detections:
             return None
 
@@ -67,14 +67,13 @@ class VisionLoop:
         if new_fen == self.prev_fen:
             return None
 
-        # Try all legal moves from current board state
         for move in self.board.legal_moves:
             test_board = self.board.copy()
             test_board.push(move)
             if test_board.board_fen() == new_fen:
                 return move.uci()
 
-        return None  # Could not match to a legal move
+        return None
 
     def run(self):
         """Start the live camera loop."""
@@ -82,9 +81,8 @@ class VisionLoop:
         if not cap.isOpened():
             raise RuntimeError(f"Cannot open camera {self.camera_index}")
 
-        print(f"Camera opened. Press 'q' to quit, 's' to save current FEN.\n")
+        print("Camera opened. Press 'q' to quit, 's' to save current FEN.\n")
 
-        # Get corners — use saved config or full frame
         ret, first_frame = cap.read()
         if not ret:
             raise RuntimeError("Cannot read from camera.")
@@ -102,22 +100,18 @@ class VisionLoop:
 
             status = self.motion.update(frame)
 
-            # Draw motion indicator on preview
             if self.show_preview:
                 color = (0, 0, 255) if status["motion"] else (0, 255, 0)
                 label = "MOTION" if status["motion"] else "STABLE"
                 cv2.putText(frame, f"{label}  diff={status['diff_ratio']:.4f}",
                             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
                 cv2.putText(frame, f"Moves detected: {self.move_count}",
-                            (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2)
+                            (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
-                # Draw board corners
                 x1, y1, x2, y2 = corners
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
-
                 cv2.imshow("Chess Vision", frame)
 
-            # Only run YOLO when board settles after a move
             if status["trigger"]:
                 inference_count += 1
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] "
@@ -137,7 +131,7 @@ class VisionLoop:
                         except Exception as e:
                             print(f"  Invalid move: {e}")
                     else:
-                        print(f"  FEN changed but no legal move matched.")
+                        print("  FEN changed but no legal move matched.")
 
                     self.prev_fen = new_fen
                     print(f"  FEN: {new_fen}")

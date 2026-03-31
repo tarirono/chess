@@ -8,8 +8,51 @@ from src.behavioral.model   import ChessResNet
 from src.behavioral.encoder import board_to_tensor, move_to_index, index_to_move, NUM_MOVES
 
 MODELS_DIR = Path("data/models/behavioral")
+BRACKETS   = ["1200", "1400", "1600"]
 
-BRACKETS = ["1200", "1400", "1600"]
+
+def _load_state_dict(model: ChessResNet, checkpoint: dict, path: Path) -> None:
+    """
+    Load weights robustly regardless of whether the checkpoint was saved
+    with 'policy.' or 'policy_head.' key prefix (Colab vs local training).
+
+    BUG FIX: the previous str.replace approach silently loaded wrong weights
+    if the prefixes already matched (the replace became a no-op).  We now:
+      1. Try strict loading first (both environments aligned).
+      2. If that fails with a key error, remap 'policy.' → 'policy_head.'
+         only when those keys are actually present, then verify no keys are
+         missing or unexpected after remapping.
+    """
+    state_dict = checkpoint["state_dict"]
+
+    # --- attempt 1: strict load (preferred, covers locally trained models) ---
+    try:
+        model.load_state_dict(state_dict, strict=True)
+        return
+    except RuntimeError:
+        pass
+
+    # --- attempt 2: remap Colab 'policy.' prefix → local 'policy_head.' ---
+    needs_remap = any(k.startswith("policy.") for k in state_dict)
+    if needs_remap:
+        remapped = {
+            k.replace("policy.", "policy_head.", 1): v
+            for k, v in state_dict.items()
+        }
+    else:
+        remapped = state_dict
+
+    missing, unexpected = model.load_state_dict(remapped, strict=False)
+    if missing:
+        raise RuntimeError(
+            f"[MoveService] Cannot load {path.name} — "
+            f"missing keys after remap: {missing}"
+        )
+    if unexpected:
+        raise RuntimeError(
+            f"[MoveService] Cannot load {path.name} — "
+            f"unexpected keys after remap: {unexpected}"
+        )
 
 
 class MoveService:
@@ -29,33 +72,24 @@ class MoveService:
             if not path.exists():
                 print(f"  [MoveService] No model for bracket {bracket} — skipping.")
                 continue
+
             checkpoint = torch.load(path, map_location="cpu", weights_only=False)
-
-            # Fix key mismatch between Colab model (policy) and local model (policy_head)
-            state_dict = checkpoint["state_dict"]
-            fixed = {}
-            for k, v in state_dict.items():
-                new_key = k.replace("policy.", "policy_head.")
-                fixed[new_key] = v
-
             model = ChessResNet()
-            model.load_state_dict(fixed)
+            _load_state_dict(model, checkpoint, path)
             model.eval()
             self.models[bracket] = model
             print(f"  [MoveService] Loaded Elo {bracket} "
-                    f"(val_acc={checkpoint.get('val_acc', '?'):.1f}%)")
+                  f"(val_acc={checkpoint.get('val_acc', '?'):.1f}%)")
 
         if not self.models:
             raise RuntimeError("No trained models found. Run train_behavioral.py first.")
 
     def _closest_bracket(self, elo: int) -> str:
-        """Return the bracket name closest to the given Elo."""
         bracket_centers = {"1200": 1200, "1400": 1400, "1600": 1600}
         available = {k: v for k, v in bracket_centers.items() if k in self.models}
         return min(available, key=lambda k: abs(available[k] - elo))
 
     def _legal_mask(self, board: chess.Board) -> torch.Tensor:
-        """Build a boolean mask of legal move indices."""
         mask = torch.zeros(NUM_MOVES, dtype=torch.bool)
         for move in board.legal_moves:
             mask[move_to_index(move)] = True
@@ -65,14 +99,7 @@ class MoveService:
                  temperature: float = 1.0) -> dict:
         """
         Given a FEN position and target Elo, return a move dict:
-          {
-            "uci":     str,   e.g. "e2e4"
-            "bracket": str,   e.g. "1400"
-            "conf":    float, top move probability after masking
-          }
-
-        temperature > 1.0 = more random (weaker play)
-        temperature < 1.0 = more deterministic (stronger play)
+          { "uci": str, "bracket": str, "conf": float }
         """
         bracket = self._closest_bracket(elo)
         model   = self.models[bracket]
@@ -92,11 +119,8 @@ class MoveService:
         model.eval()
         with torch.no_grad():
             logits = model(tensor.unsqueeze(0))[0]
-
-            # Mask illegal moves
             logits[~legal_mask] = float("-inf")
 
-            # Apply temperature scaling
             if temperature != 1.0:
                 logits = logits / temperature
 
@@ -106,15 +130,12 @@ class MoveService:
 
         move = index_to_move(move_index)
 
-        # Ensure move is legal (promotion fallback)
         if move not in board.legal_moves:
-            # Try with queen promotion
             move_q = chess.Move(move.from_square, move.to_square,
                                 promotion=chess.QUEEN)
             if move_q in board.legal_moves:
                 move = move_q
             else:
-                # Fallback to first legal move
                 move = next(iter(board.legal_moves))
 
         return {

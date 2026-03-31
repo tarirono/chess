@@ -15,7 +15,7 @@ class Neo4jClient:
     Handles all Neo4j operations for the Chess Ecosystem.
     Graph schema:
       (Player)-[:PLAYED]->(Game)-[:HAS_MOVE]->(Move)-[:INVOLVES]->(Skill)
-      (Player)-[:PERFORMANCE {attempts, successes}]->(Skill)
+      (Player)-[:PERFORMANCE {attempts, successes, irt_ability}]->(Skill)
     """
 
     def __init__(self):
@@ -35,7 +35,6 @@ class Neo4jClient:
         self._seed_skills()
 
     def _seed_skills(self):
-        """Create all skill nodes if they don't exist."""
         skills = [
             "Pin", "Fork", "Discovery", "Skewer",
             "Checkmate_pattern", "Endgame", "Opening",
@@ -93,7 +92,6 @@ class Neo4jClient:
             return dict(result.single()["g"])
 
     def finish_game(self, game_id: str, result: str, total_moves: int):
-        """result: 'win', 'loss', 'draw'"""
         with self.driver.session() as s:
             s.run(
                 """
@@ -113,12 +111,7 @@ class Neo4jClient:
                     uci: str, fen_before: str,
                     skills_present: list[str],
                     player_found_best: bool):
-        """
-        Record a player move and link it to involved skill concepts.
-        player_found_best: True if player played the best move.
-        """
         with self.driver.session() as s:
-            # Create move node
             s.run(
                 """
                 MATCH (g:Game {id: $game_id})
@@ -136,8 +129,6 @@ class Neo4jClient:
                 best=player_found_best,
                 ts=datetime.now().isoformat()
             )
-
-            # Link move to skills
             for skill in skills_present:
                 s.run(
                     """
@@ -151,7 +142,6 @@ class Neo4jClient:
 
     def update_player_skill(self, player_id: str, skill_name: str,
                              success: bool):
-        """Update player's performance on a skill after each move."""
         with self.driver.session() as s:
             s.run(
                 """
@@ -169,11 +159,63 @@ class Neo4jClient:
             )
 
     # ------------------------------------------------------------------
+    # BUG FIX: targeted single-skill query
+    # ------------------------------------------------------------------
+
+    def get_single_skill_profile(self, player_id: str,
+                                  skill_name: str) -> dict | None:
+        """
+        Fetch IRT fields for ONE skill in a single Cypher round-trip.
+
+        BUG FIX (N+1): the old code called get_player_skill_profile() — which
+        returns ALL skills — just to extract one. With 3+ tags per move that
+        means 3+ full profile queries per move.  This targeted query costs
+        exactly one round-trip regardless of how many skills the player has.
+        """
+        with self.driver.session() as s:
+            result = s.run(
+                """
+                MATCH (p:Player {id: $pid})-[r:PERFORMANCE]->(sk:Skill {name: $skill})
+                RETURN sk.name      AS skill,
+                       r.attempts   AS attempts,
+                       r.successes  AS successes,
+                       r.irt_ability AS irt_ability,
+                       sk.difficulty AS difficulty
+                """,
+                pid=player_id, skill=skill_name
+            )
+            record = result.single()
+            return dict(record) if record else None
+
+    # ------------------------------------------------------------------
+    # BUG FIX: persist updated skill difficulty back to Neo4j
+    # ------------------------------------------------------------------
+
+    def update_irt_params(self, player_id: str, skill_name: str,
+                           new_ability: float, new_difficulty: float):
+        """
+        Persist both the player's updated ability AND the skill's updated
+        difficulty in a single write query.
+
+        BUG FIX: skill difficulty was previously stuck at the seeded 0.5
+        because update_difficulty() was computed but never saved.
+        """
+        with self.driver.session() as s:
+            s.run(
+                """
+                MATCH (p:Player {id: $pid})-[r:PERFORMANCE]->(sk:Skill {name: $skill})
+                SET r.irt_ability  = $ability,
+                    sk.difficulty  = $difficulty
+                """,
+                pid=player_id, skill=skill_name,
+                ability=new_ability, difficulty=new_difficulty
+            )
+
+    # ------------------------------------------------------------------
     # Queries
     # ------------------------------------------------------------------
 
     def get_player_skill_profile(self, player_id: str) -> list[dict]:
-        """Return all skill performances for a player."""
         with self.driver.session() as s:
             result = s.run(
                 """

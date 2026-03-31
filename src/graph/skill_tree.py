@@ -28,7 +28,6 @@ class SkillTree:
 
     def start_game(self, player_id: str, player_elo: int,
                    bot_bracket: str) -> str:
-        """Create a new game record. Returns game_id."""
         game_id = str(uuid.uuid4())[:8]
         self.db.create_game(game_id, player_id, player_elo, bot_bracket)
         return game_id
@@ -39,19 +38,23 @@ class SkillTree:
                             best_move: chess.Move = None):
         """
         After a player makes a move:
-        1. Tag the position with skill concepts
-        2. Check if player found the best move
-        3. Store in Neo4j
-        4. Update IRT ability estimates
+        1. Tag the position with skill concepts.
+        2. Check if player found the best move.
+        3. Store move in Neo4j.
+        4. Update IRT ability AND difficulty estimates.
+
+        BUG FIX (N+1): replaced the per-skill call to get_player_skill_profile()
+        (which fetched ALL skills) with get_single_skill_profile() — one targeted
+        query per skill instead of one full-profile query per skill.
+
+        BUG FIX (difficulty not updated): now calls irt.update_difficulty() and
+        persists both ability + difficulty in a single write via update_irt_params().
         """
-        # Tag skills present in this position
         skills = self.tagger.tag_position(board_before, move)
 
-        # Did player find the best move?
         player_found_best = (best_move is not None and
                              move.uci() == best_move.uci())
 
-        # Store move in graph
         self.db.record_move(
             game_id=game_id,
             move_number=move_number,
@@ -61,35 +64,46 @@ class SkillTree:
             player_found_best=player_found_best
         )
 
-        # Update player skill performance + IRT ability
         for skill_name in skills:
-            self.db.update_player_skill(
-                player_id, skill_name, player_found_best
+            # 1. Update attempt + success counters
+            self.db.update_player_skill(player_id, skill_name, player_found_best)
+
+            # 2. Fetch only THIS skill's IRT fields (one targeted query)
+            profile = self.db.get_single_skill_profile(player_id, skill_name)
+            if not profile:
+                continue
+
+            current_ability    = profile.get("irt_ability", 0.0)
+            current_difficulty = profile.get("difficulty", 0.5)
+
+            # 3. Update ability estimate
+            new_ability = self.irt.update_ability(
+                current_ability=current_ability,
+                success=player_found_best,
+                difficulty=current_difficulty
             )
-            # Update IRT ability in the graph
-            profile = self._get_skill_profile(player_id, skill_name)
-            if profile:
-                new_ability = self.irt.update_ability(
-                    current_ability=profile.get("irt_ability", 0.0),
-                    success=player_found_best,
-                    difficulty=profile.get("difficulty", 0.5)
-                )
-                self._update_irt_ability(player_id, skill_name, new_ability)
+
+            # 4. Update difficulty estimate (was previously never called)
+            new_difficulty = self.irt.update_difficulty(
+                current_difficulty=current_difficulty,
+                success=player_found_best,
+                ability=current_ability
+            )
+
+            # 5. Persist both in a single write
+            self.db.update_irt_params(
+                player_id, skill_name, new_ability, new_difficulty
+            )
 
         return skills
 
     def get_zpd_recommendations(self, player_id: str) -> list[dict]:
-        """
-        Return ZPD skill recommendations for a player.
-        These are the skills they should practice next.
-        """
         profiles = self.db.get_player_skill_profile(player_id)
         if not profiles:
             return []
         return self.irt.zone_of_proximal_development(profiles)
 
     def get_skill_summary(self, player_id: str) -> dict:
-        """Full skill profile summary for dashboard display."""
         profiles  = self.db.get_player_skill_profile(player_id)
         zpd       = self.irt.zone_of_proximal_development(profiles)
 
@@ -98,32 +112,13 @@ class SkillTree:
         too_hard  = [s for s in zpd if s["category"] == "too_hard"]
 
         return {
-            "player_id":   player_id,
-            "total_skills_seen": len(profiles),
-            "mastered":    mastered,
-            "practice_now": in_zpd,
-            "not_ready":   too_hard,
+            "player_id":          player_id,
+            "total_skills_seen":  len(profiles),
+            "mastered":           mastered,
+            "practice_now":       in_zpd,
+            "not_ready":          too_hard,
             "top_recommendation": in_zpd[0]["skill"] if in_zpd else None
         }
-
-    def _get_skill_profile(self, player_id: str,
-                            skill_name: str) -> dict | None:
-        profiles = self.db.get_player_skill_profile(player_id)
-        for p in profiles:
-            if p["skill"] == skill_name:
-                return p
-        return None
-
-    def _update_irt_ability(self, player_id: str,
-                             skill_name: str, ability: float):
-        with self.db.driver.session() as s:
-            s.run(
-                """
-                MATCH (p:Player {id: $pid})-[r:PERFORMANCE]->(sk:Skill {name: $skill})
-                SET r.irt_ability = $ability
-                """,
-                pid=player_id, skill=skill_name, ability=ability
-            )
 
     def close(self):
         self.db.close()
