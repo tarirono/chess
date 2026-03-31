@@ -4,10 +4,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from neo4j import GraphDatabase
 from datetime import datetime
+from dotenv import load_dotenv
+import os
 
-URI      = "neo4j://127.0.0.1:7687"
-USER     = "neo4j"
-PASSWORD = "chess123"
+load_dotenv()
+
+URI      = os.getenv("NEO4J_URI",      "neo4j://127.0.0.1:7687")
+USER     = os.getenv("NEO4J_USER",     "neo4j")
+PASSWORD = os.getenv("NEO4J_PASSWORD", "chess123")
 
 
 class Neo4jClient:
@@ -16,6 +20,8 @@ class Neo4jClient:
     Graph schema:
       (Player)-[:PLAYED]->(Game)-[:HAS_MOVE]->(Move)-[:INVOLVES]->(Skill)
       (Player)-[:PERFORMANCE {attempts, successes, irt_ability}]->(Skill)
+
+    Credentials are loaded from .env (NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD).
     """
 
     def __init__(self):
@@ -158,20 +164,8 @@ class Neo4jClient:
                 success=success, ts=datetime.now().isoformat()
             )
 
-    # ------------------------------------------------------------------
-    # BUG FIX: targeted single-skill query
-    # ------------------------------------------------------------------
-
     def get_single_skill_profile(self, player_id: str,
                                   skill_name: str) -> dict | None:
-        """
-        Fetch IRT fields for ONE skill in a single Cypher round-trip.
-
-        BUG FIX (N+1): the old code called get_player_skill_profile() — which
-        returns ALL skills — just to extract one. With 3+ tags per move that
-        means 3+ full profile queries per move.  This targeted query costs
-        exactly one round-trip regardless of how many skills the player has.
-        """
         with self.driver.session() as s:
             result = s.run(
                 """
@@ -187,19 +181,8 @@ class Neo4jClient:
             record = result.single()
             return dict(record) if record else None
 
-    # ------------------------------------------------------------------
-    # BUG FIX: persist updated skill difficulty back to Neo4j
-    # ------------------------------------------------------------------
-
     def update_irt_params(self, player_id: str, skill_name: str,
                            new_ability: float, new_difficulty: float):
-        """
-        Persist both the player's updated ability AND the skill's updated
-        difficulty in a single write query.
-
-        BUG FIX: skill difficulty was previously stuck at the seeded 0.5
-        because update_difficulty() was computed but never saved.
-        """
         with self.driver.session() as s:
             s.run(
                 """

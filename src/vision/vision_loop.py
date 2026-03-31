@@ -4,6 +4,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import cv2
 import chess
+import chess.pgn
 from datetime import datetime
 
 from src.vision.piece_detector import PieceDetector
@@ -41,10 +42,6 @@ class VisionLoop:
         Passes the numpy array directly to YOLO — no temp file written.
         """
         h, w = frame.shape[:2]
-
-        # BUG FIX: Ultralytics accepts numpy arrays directly.
-        # Previously wrote to _tmp_frame.jpg causing a race condition when
-        # inference is slower than the motion trigger rate.
         detections = self.detector.detect(frame)
         if not detections:
             return None
@@ -75,13 +72,49 @@ class VisionLoop:
 
         return None
 
+    def _save_snapshot(self):
+        """
+        Save both a FEN file and a PGN file for the current board state.
+        Called when the user presses 's'.
+        """
+        timestamp = datetime.now().strftime("%H%M%S")
+        out_dir   = Path("data/raw")
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # --- FEN ---
+        if self.prev_fen:
+            fen_path = out_dir / f"fen_{timestamp}.txt"
+            fen_path.write_text(self.prev_fen)
+            print(f"FEN saved to {fen_path}")
+
+        # --- PGN ---
+        if self.board.move_stack:
+            game = chess.pgn.Game()
+            game.headers["Event"] = "Chess Ecosystem — Vision Session"
+            game.headers["Date"]  = datetime.now().strftime("%Y.%m.%d")
+            game.headers["White"] = "Player"
+            game.headers["Black"] = "Bot"
+
+            node = game
+            tmp  = chess.Board()
+            for move in self.board.move_stack:
+                node = node.add_variation(move)
+                tmp.push(move)
+
+            pgn_path = out_dir / f"game_{timestamp}.pgn"
+            with open(pgn_path, "w") as f:
+                print(game, file=f, end="\n\n")
+            print(f"PGN saved to {pgn_path}")
+        else:
+            print("No moves recorded yet — PGN not saved.")
+
     def run(self):
         """Start the live camera loop."""
         cap = cv2.VideoCapture(self.camera_index)
         if not cap.isOpened():
             raise RuntimeError(f"Cannot open camera {self.camera_index}")
 
-        print("Camera opened. Press 'q' to quit, 's' to save current FEN.\n")
+        print("Camera opened. Press 'q' to quit, 's' to save FEN + PGN.\n")
 
         ret, first_frame = cap.read()
         if not ret:
@@ -139,10 +172,8 @@ class VisionLoop:
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
                 break
-            elif key == ord('s') and self.prev_fen:
-                out = Path(f"data/raw/fen_{datetime.now().strftime('%H%M%S')}.txt")
-                out.write_text(self.prev_fen)
-                print(f"FEN saved to {out}")
+            elif key == ord('s'):
+                self._save_snapshot()
 
         cap.release()
         cv2.destroyAllWindows()
