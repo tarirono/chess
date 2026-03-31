@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 13
+names: ['bishop', 'black-bishop', 'black-king', 'black-knight', 'black-pawn', 'black-queen', 'black-rook', 'white-bishop', 'white-king', 'white-knight', 'white-pawn', 'white-queen', 'white-rook']
+
+roboflow:
+  workspace: roboflow-100
+  project: chess-pieces-mjzgj
+  version: 2
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/roboflow-100/chess-pieces-mjzgj/dataset/2
