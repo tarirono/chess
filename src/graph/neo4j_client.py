@@ -113,10 +113,20 @@ class Neo4jClient:
     # Moves + Skills
     # ------------------------------------------------------------------
 
-    def record_move(self, game_id: str, move_number: int,
-                    uci: str, fen_before: str,
-                    skills_present: list[str],
-                    player_found_best: bool):
+    def record_move(
+        self,
+        game_id: str,
+        move_number: int,
+        uci: str,
+        fen_before: str,
+        skills_present: list[str],
+        player_found_best: bool,
+        cp_loss: int | None = None,
+        move_class: str = "unknown",
+    ):
+        """
+        Store a move node with engine evaluation metadata (cp_loss, move_class).
+        """
         with self.driver.session() as s:
             s.run(
                 """
@@ -126,6 +136,8 @@ class Neo4jClient:
                     uci: $uci,
                     fen_before: $fen,
                     player_found_best: $best,
+                    cp_loss: $cp_loss,
+                    move_class: $move_class,
                     recorded_at: $ts
                 })
                 CREATE (g)-[:HAS_MOVE]->(m)
@@ -133,6 +145,8 @@ class Neo4jClient:
                 game_id=game_id, move_num=move_number,
                 uci=uci, fen=fen_before,
                 best=player_found_best,
+                cp_loss=cp_loss if cp_loss is not None else -1,
+                move_class=move_class,
                 ts=datetime.now().isoformat()
             )
             for skill in skills_present:
@@ -211,6 +225,26 @@ class Neo4jClient:
                 ORDER BY r.attempts DESC
                 """,
                 pid=player_id
+            )
+            return [dict(row) for row in result]
+
+    def get_player_move_history(self, player_id: str, limit: int = 50) -> list[dict]:
+        """
+        Returns recent moves with cp_loss and move_class for Elo validation
+        and dashboard display.
+        """
+        with self.driver.session() as s:
+            result = s.run(
+                """
+                MATCH (p:Player {id: $pid})-[:PLAYED]->(g:Game)-[:HAS_MOVE]->(m:Move)
+                RETURN m.uci AS uci, m.move_number AS move_number,
+                       m.cp_loss AS cp_loss, m.move_class AS move_class,
+                       m.player_found_best AS found_best,
+                       g.id AS game_id
+                ORDER BY g.played_at DESC, m.move_number ASC
+                LIMIT $limit
+                """,
+                pid=player_id, limit=limit
             )
             return [dict(row) for row in result]
 

@@ -1,14 +1,13 @@
 import sys
 from pathlib import Path
 
-# Must be set before any src imports
 ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
+import json
 from flask import Flask, render_template, request, jsonify
-from src.integration.game_manager import GameManager
+from src.integration.game_manager1 import GameManager
 
-# Tell Flask where templates are
 app = Flask(
     __name__,
     template_folder=str(ROOT / "src" / "dashboard" / "templates"),
@@ -63,7 +62,48 @@ def get_skills():
     return jsonify(manager.get_skill_summary())
 
 
+# ------------------------------------------------------------------
+# Phase A camera endpoints
+# ------------------------------------------------------------------
+
+@app.route("/api/camera/start", methods=["POST"])
+def camera_start():
+    global manager
+    if manager is None:
+        return jsonify({"error": "Start a game first"}), 400
+    if manager.status != "in_progress":
+        return jsonify({"error": "Game not in progress"}), 400
+    try:
+        data         = request.get_json(force=True) or {}
+        camera_index = int(data.get("camera_index", 0))
+        manager.start_vision_thread(camera_index=camera_index)
+        return jsonify({"status": "camera started", "camera_index": camera_index})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/camera/stop", methods=["POST"])
+def camera_stop():
+    global manager
+    if manager is None:
+        return jsonify({"error": "No active game"}), 400
+    manager.stop_vision_thread()
+    return jsonify({"status": "camera stopped"})
+
+
+# ------------------------------------------------------------------
+# Elo validation results endpoint
+# ------------------------------------------------------------------
+
+@app.route("/api/elo_validation")
+def elo_validation():
+    path = ROOT / "data" / "models" / "behavioral" / "elo_validation.json"
+    if not path.exists():
+        return jsonify({"error": "No validation results found. Run scripts/validate_elo.py"}), 404
+    with open(path) as f:
+        return jsonify(json.load(f))
+
+
 if __name__ == "__main__":
     print(f"Dashboard running — templates: {ROOT / 'src' / 'dashboard' / 'templates'}")
     app.run(debug=True, port=5000, use_reloader=False)
-

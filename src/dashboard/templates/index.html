@@ -14,12 +14,18 @@
   .card { background:#1a1d27; border:1px solid #2a2d3a; border-radius:12px; }
   .card-title { color:#7eb8f7; font-size:13px; text-transform:uppercase;
                 letter-spacing:1px; margin-bottom:8px; }
-  .badge-skill { background:#1e3a5f; color:#7eb8f7; border-radius:20px;
-                 padding:3px 10px; font-size:11px; margin:2px; display:inline-block; }
-  .badge-zpd   { background:#1a3a1a; color:#5cb85c; border-radius:20px;
-                 padding:3px 10px; font-size:11px; margin:2px; display:inline-block; }
-  .badge-hard  { background:#3a1a1a; color:#e05050; border-radius:20px;
-                 padding:3px 10px; font-size:11px; margin:2px; display:inline-block; }
+  .badge-skill  { background:#1e3a5f; color:#7eb8f7; border-radius:20px;
+                  padding:3px 10px; font-size:11px; margin:2px; display:inline-block; }
+  .badge-zpd    { background:#1a3a1a; color:#5cb85c; border-radius:20px;
+                  padding:3px 10px; font-size:11px; margin:2px; display:inline-block; }
+  .badge-hard   { background:#3a1a1a; color:#e05050; border-radius:20px;
+                  padding:3px 10px; font-size:11px; margin:2px; display:inline-block; }
+  .badge-best      { background:#1a3a1a; color:#5cb85c; border-radius:12px; padding:2px 8px; font-size:10px; }
+  .badge-good      { background:#1a2a1a; color:#7db87d; border-radius:12px; padding:2px 8px; font-size:10px; }
+  .badge-inaccuracy{ background:#3a2a1a; color:#e0a050; border-radius:12px; padding:2px 8px; font-size:10px; }
+  .badge-mistake   { background:#3a1a1a; color:#e07050; border-radius:12px; padding:2px 8px; font-size:10px; }
+  .badge-blunder   { background:#4a1a1a; color:#e05050; border-radius:12px; padding:2px 8px; font-size:10px; font-weight:600; }
+  .badge-unknown   { background:#2a2a2a; color:#888; border-radius:12px; padding:2px 8px; font-size:10px; }
   .move-row { border-bottom:1px solid #2a2d3a; padding:5px 0; font-size:12px; }
   .pgn-box { background:#0f1117; border-radius:8px; padding:10px;
              font-family:monospace; font-size:12px; color:#a0c4ff; min-height:36px; }
@@ -34,11 +40,16 @@
   .btn-primary:hover { background:#2a4d7f; }
   .btn-success { background:#1a3a1a; border-color:#2a5a2a; }
   .btn-success:hover { background:#2a5a2a; }
+  .btn-warning { background:#3a2a1a; border-color:#5a4a2a; color:#e0a050; }
+  .btn-warning:hover { background:#4a3a2a; color:#e0a050; }
   h1 { color:#7eb8f7; font-size:20px; font-weight:600; }
   #board { width:100% !important; }
   .status-active   { color:#5cb85c; }
   .status-finished { color:#e05050; }
   .status-waiting  { color:#f0ad4e; }
+  .cp-badge { font-family:monospace; font-size:11px; color:#888; margin-left:6px; }
+  .camera-active { animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
 </style>
 </head>
 <body>
@@ -46,6 +57,7 @@
 
   <div class="d-flex align-items-center justify-content-between mb-3 px-2">
     <h1>♟ Chess Ecosystem — PFE 2025</h1>
+    <div id="camera-status" class="small" style="color:#888">Camera: off</div>
   </div>
 
   <div class="row g-3">
@@ -61,9 +73,15 @@
           <option value="1400" selected>Elo 1400 — Intermediate bot</option>
           <option value="1600">Elo 1600 — Advanced bot</option>
         </select>
-        <button class="btn btn-primary btn-sm w-100" onclick="newGame()">
-          Start Game
-        </button>
+        <div class="d-flex gap-2">
+          <button class="btn btn-primary btn-sm flex-fill" onclick="newGame()">
+            Start Game
+          </button>
+          <button class="btn btn-warning btn-sm" id="camera-btn"
+                  onclick="toggleCamera()" title="Toggle live camera (Phase A)">
+            📷 Camera
+          </button>
+        </div>
         <div id="game-status" class="text-center mt-2 status-waiting small">
           No active game
         </div>
@@ -82,13 +100,13 @@
         <div class="card-title">Make a Move</div>
         <div class="input-group input-group-sm mb-2">
           <input type="text" id="move-input" class="form-control"
-                 placeholder="e.g. e2e4" maxlength="5">
+                 placeholder="e.g. e2e4  (or use camera)" maxlength="5">
           <button class="btn btn-success" onclick="makeMove()">Play</button>
         </div>
         <div id="move-error" class="text-danger small"></div>
         <div class="mt-2">
-          <div class="card-title">Last move skills</div>
-          <div id="last-skills" class="small">—</div>
+          <div class="card-title">Last move analysis</div>
+          <div id="last-analysis" class="small">—</div>
         </div>
       </div>
 
@@ -99,7 +117,7 @@
 
       <div class="card p-3">
         <div class="card-title">Move History</div>
-        <div id="move-history" style="max-height:200px;overflow-y:auto"></div>
+        <div id="move-history" style="max-height:220px;overflow-y:auto"></div>
       </div>
     </div>
 
@@ -112,7 +130,7 @@
         </div>
       </div>
 
-      <div class="card p-3">
+      <div class="card p-3 mb-3">
         <div class="card-title">Skill Profile</div>
         <div id="skill-profile" class="small">—</div>
         <button class="btn btn-primary btn-sm w-100 mt-2"
@@ -120,23 +138,37 @@
           Refresh Skills
         </button>
       </div>
+
+      <!-- Elo validation results panel (populated if validation was run) -->
+      <div class="card p-3" id="elo-panel" style="display:none">
+        <div class="card-title">Elo Validation</div>
+        <div id="elo-results" class="small">—</div>
+      </div>
     </div>
 
   </div>
 </div>
 
 <script>
-let board = null;
+let board       = null;
+let cameraOn    = false;
+let pollTimer   = null;
 
+// ----------------------------------------------------------------
+// Board
+// ----------------------------------------------------------------
 function initBoard(fen) {
   const cfg = {
-    position: fen || 'start',
+    position:   fen || 'start',
     pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png'
   };
   if (board) { board.position(fen || 'start'); }
   else       { board = Chessboard('board', cfg); }
 }
 
+// ----------------------------------------------------------------
+// New game
+// ----------------------------------------------------------------
 function newGame() {
   const pid = document.getElementById('player-id').value || 'player_1';
   const elo = parseInt(document.getElementById('player-elo').value);
@@ -153,10 +185,14 @@ function newGame() {
       'Game ' + state.game_id + ' — Active';
     document.getElementById('game-status').className =
       'text-center mt-2 status-active small';
+    loadEloValidation();
   })
   .catch(e => console.error('newGame error:', e));
 }
 
+// ----------------------------------------------------------------
+// Manual move
+// ----------------------------------------------------------------
 function makeMove() {
   const uci = document.getElementById('move-input').value.trim().toLowerCase();
   document.getElementById('move-error').textContent = '';
@@ -184,6 +220,49 @@ function makeMove() {
   .catch(e => console.error('makeMove error:', e));
 }
 
+// ----------------------------------------------------------------
+// Camera toggle (starts/stops Phase A vision thread via API)
+// ----------------------------------------------------------------
+function toggleCamera() {
+  cameraOn = !cameraOn;
+  const btn = document.getElementById('camera-btn');
+  const status = document.getElementById('camera-status');
+
+  if (cameraOn) {
+    fetch('/api/camera/start', {method: 'POST'})
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) { cameraOn = false; status.textContent = 'Camera: error'; return; }
+      btn.classList.add('camera-active');
+      status.textContent = 'Camera: active — moves auto-detected';
+      status.style.color = '#5cb85c';
+      // Poll state every 1.5s to reflect camera-detected moves
+      pollTimer = setInterval(pollState, 1500);
+    });
+  } else {
+    fetch('/api/camera/stop', {method: 'POST'});
+    btn.classList.remove('camera-active');
+    status.textContent = 'Camera: off';
+    status.style.color = '#888';
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+}
+
+function pollState() {
+  fetch('/api/state')
+  .then(r => r.json())
+  .then(state => { if (!state.error) updateUI(state); })
+  .catch(() => {});
+}
+
+// ----------------------------------------------------------------
+// UI update
+// ----------------------------------------------------------------
+function moveClassBadge(cls) {
+  const safe = (cls || 'unknown').replace(/[^a-z]/g, '');
+  return '<span class="badge-' + safe + '">' + (cls || '?') + '</span>';
+}
+
 function updateUI(state) {
   initBoard(state.fen);
 
@@ -192,23 +271,32 @@ function updateUI(state) {
 
   document.getElementById('pgn-box').textContent = state.pgn || '—';
 
-  if (state.last_entry && state.last_entry.skills) {
-    document.getElementById('last-skills').innerHTML =
-      state.last_entry.skills
-        .map(s => '<span class="badge-skill">' + s + '</span>')
-        .join('') || '—';
+  // Last move analysis panel
+  if (state.last_entry) {
+    const e = state.last_entry;
+    const skills = (e.skills || []).map(s => '<span class="badge-skill">' + s + '</span>').join('');
+    const cpStr  = (e.cp_loss != null && e.cp_loss >= 0)
+      ? '<span class="cp-badge">−' + e.cp_loss + ' cp</span>' : '';
+    document.getElementById('last-analysis').innerHTML =
+      moveClassBadge(e.move_class) + cpStr +
+      '<div style="margin-top:4px">' + (skills || '<span style="color:#666">—</span>') + '</div>';
   }
 
+  // Move history
   const hist = state.history || [];
-  document.getElementById('move-history').innerHTML = hist.map(h =>
-    '<div class="move-row">' +
-    '<span style="color:#7eb8f7">Move ' + h.move_number + '</span> ' +
-    'You: <b>' + h.player_move + '</b>' +
-    (h.bot_move ? ' &nbsp; Bot: <b>' + h.bot_move + '</b>' : '') +
-    '<br><small style="color:#666">' + (h.skills || []).join(', ') + '</small>' +
-    '</div>'
-  ).join('') || '—';
+  document.getElementById('move-history').innerHTML = hist.map(h => {
+    const cpStr = (h.cp_loss != null && h.cp_loss >= 0)
+      ? '<span class="cp-badge">−' + h.cp_loss + 'cp</span>' : '';
+    return '<div class="move-row">' +
+      '<span style="color:#7eb8f7">Move ' + h.move_number + '</span> ' +
+      'You: <b>' + h.player_move + '</b>' + cpStr + ' ' +
+      moveClassBadge(h.move_class) +
+      (h.bot_move ? ' &nbsp; Bot: <b>' + h.bot_move + '</b>' : '') +
+      '<br><small style="color:#666">' + (h.skills || []).join(', ') + '</small>' +
+      '</div>';
+  }).join('') || '—';
 
+  // ZPD
   if (state.zpd && state.zpd.length > 0) {
     document.getElementById('zpd-recs').innerHTML = state.zpd.map(z => {
       const pct = Math.round(z.probability * 100);
@@ -218,8 +306,7 @@ function updateUI(state) {
         '<span class="' + cls + '">' + z.skill + '</span>' +
         '<small class="ms-2" style="color:#666">' +
           pct + '% success · ' + z.attempts + ' attempts</small>' +
-        '<div class="skill-bar">' +
-          '<div class="skill-fill" style="width:' + pct + '%"></div></div>' +
+        '<div class="skill-bar"><div class="skill-fill" style="width:' + pct + '%"></div></div>' +
         '</div>';
     }).join('');
   }
@@ -230,9 +317,9 @@ function refreshSkills() {
   .then(r => r.json())
   .then(data => {
     const all = [
-      ...(data.mastered      || []),
-      ...(data.practice_now  || []),
-      ...(data.not_ready     || [])
+      ...(data.mastered     || []),
+      ...(data.practice_now || []),
+      ...(data.not_ready    || [])
     ];
     if (!all.length) {
       document.getElementById('skill-profile').innerHTML =
@@ -249,12 +336,34 @@ function refreshSkills() {
         '<span class="' + cls + '">' + lbl + ' ' + s.skill + '</span>' +
         '<small class="ms-2" style="color:#666">' +
           pct + '% · ' + s.attempts + ' tries</small>' +
-        '<div class="skill-bar">' +
-          '<div class="skill-fill" style="width:' + pct + '%"></div></div>' +
+        '<div class="skill-bar"><div class="skill-fill" style="width:' + pct + '%"></div></div>' +
         '</div>';
     }).join('');
   })
   .catch(e => console.error('refreshSkills error:', e));
+}
+
+function loadEloValidation() {
+  fetch('/api/elo_validation')
+  .then(r => r.json())
+  .then(data => {
+    if (!data || data.error) return;
+    const panel = document.getElementById('elo-panel');
+    const div   = document.getElementById('elo-results');
+    panel.style.display = 'block';
+    div.innerHTML = Object.entries(data.results || {}).map(([bracket, r]) =>
+      '<div class="mb-2">' +
+      '<b style="color:#7eb8f7">Elo ' + bracket + '</b>' +
+      '<small class="ms-2" style="color:#666">vs SF depth ' + r.opponent_depth + '</small><br>' +
+      'W/D/L: ' + r.wins + '/' + r.draws + '/' + r.losses +
+      ' &nbsp; avg cp loss: <b>' + r.avg_cp_loss + '</b>' +
+      ' &nbsp; Elo Δ: <b style="color:' + (r.elo_diff_vs_opponent > 0 ? '#e05050' : '#5cb85c') + '">' +
+      (r.elo_diff_vs_opponent > 0 ? '+' : '') + r.elo_diff_vs_opponent + '</b>' +
+      ' &nbsp; blunders: ' + r.blunder_pct + '%' +
+      '</div>'
+    ).join('') || '<small style="color:#666">Run scripts/validate_elo.py first</small>';
+  })
+  .catch(() => {});
 }
 
 $(document).ready(function() {
@@ -262,8 +371,8 @@ $(document).ready(function() {
   $('#move-input').on('keypress', function(e) {
     if (e.key === 'Enter') makeMove();
   });
+  loadEloValidation();
 });
 </script>
 </body>
 </html>
-

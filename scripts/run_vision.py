@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.vision.vision_loop import VisionLoop
+from src.vision.vision_loop1 import VisionLoop
 
 print("Chess Vision System — Phase A")
 print("=" * 40)
