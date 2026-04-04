@@ -21,11 +21,11 @@ class SkillTree:
     tactical patterns, replacing the previous pure-heuristic approach.
     """
 
-    def __init__(self, stockfish_path: str = "/usr/games/stockfish"):
+    def __init__(self):
         self.db      = Neo4jClient()
         self.tagger  = SkillTagger()
         self.irt     = IRTModel()
-        self.engine  = EngineAnalyzer(path=stockfish_path, depth=15)
+        self.engine  = EngineAnalyzer(depth=15)
         print("SkillTree initialised (Stockfish engine active).")
 
     def get_or_create_player(self, player_id: str,
