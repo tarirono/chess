@@ -185,7 +185,7 @@ class GameManager:
             return
 
         # Import here to avoid breaking the class when OpenCV is missing
-        from src.vision.vision_loop1 import VisionLoop
+        from src.vision.vision_loop import VisionLoop
 
         def _vision_callback(uci: str):
             """Called by VisionLoop when a move is detected."""

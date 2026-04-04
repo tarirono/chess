@@ -6,7 +6,7 @@ sys.path.insert(0, str(ROOT))
 
 import json
 from flask import Flask, render_template, request, jsonify
-from src.integration.game_manager1 import GameManager
+from src.integration.game_manager import GameManager
 
 app = Flask(
     __name__,
