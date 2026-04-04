@@ -73,12 +73,14 @@ class SkillTree:
 
         # ── 4. Persist move in Neo4j ──────────────────────────────────
         self.db.record_move(
-            game_id=game_id,
-            move_number=move_number,
-            uci=move.uci(),
-            fen_before=board_before.fen(),
-            skills_present=skills,
-            player_found_best=player_found_best,
+        game_id=game_id,
+        move_number=move_number,
+        uci=move.uci(),
+        fen_before=board_before.fen(),
+        skills_present=skills,
+        player_found_best=player_found_best,
+        cp_loss=analysis.cp_loss if analysis.available else None,
+        move_class=analysis.classification,
         )
 
         # ── 5. Update IRT per skill ───────────────────────────────────
