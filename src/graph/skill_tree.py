@@ -44,7 +44,7 @@ class SkillTree:
                             move_number: int,
                             move: chess.Move,
                             board_before: chess.Board,
-                            best_move: chess.Move | None = None) -> list[str]:
+                            best_move: chess.Move | None = None) -> dict:
         """
         After a player makes a move:
         1.  Run Stockfish analysis on the position.
@@ -107,7 +107,11 @@ class SkillTree:
             f"class={analysis.classification:<12}  skills={skills}"
         )
 
-        return skills
+        return {
+        "skills": skills,
+        "cp_loss": analysis.cp_loss if analysis.available else None,
+        "move_class": analysis.classification,
+    }
 
     def get_zpd_recommendations(self, player_id: str) -> list[dict]:
         profiles = self.db.get_player_skill_profile(player_id)

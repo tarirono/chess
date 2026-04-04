@@ -44,7 +44,7 @@ class Neo4jClient:
         skills = [
             "Pin", "Fork", "Discovery", "Skewer",
             "Checkmate_pattern", "Endgame", "Opening",
-            "Pawn_structure", "Piece_activity", "Blunder"
+            "Pawn_structure", "Piece_activity", "Blunder","Mistake", "Inaccuracy",
         ]
         with self.driver.session() as s:
             for skill in skills:
@@ -113,52 +113,35 @@ class Neo4jClient:
     # Moves + Skills
     # ------------------------------------------------------------------
 
-    def record_move(
-        self,
-        game_id: str,
-        move_number: int,
-        uci: str,
-        fen_before: str,
-        skills_present: list[str],
-        player_found_best: bool,
-        cp_loss: int | None = None,
-        move_class: str = "unknown",
-    ):
-        """
-        Store a move node with engine evaluation metadata (cp_loss, move_class).
-        """
+    def record_move(self, game_id, move_number, uci, fen_before,skills_present, player_found_best, cp_loss=None, move_class="unknown"):
         with self.driver.session() as s:
-            s.run(
-                """
-                MATCH (g:Game {id: $game_id})
-                CREATE (m:Move {
-                    move_number: $move_num,
-                    uci: $uci,
-                    fen_before: $fen,
-                    player_found_best: $best,
-                    cp_loss: $cp_loss,
-                    move_class: $move_class,
-                    recorded_at: $ts
-                })
-                CREATE (g)-[:HAS_MOVE]->(m)
-                """,
-                game_id=game_id, move_num=move_number,
-                uci=uci, fen=fen_before,
-                best=player_found_best,
-                cp_loss=cp_loss if cp_loss is not None else -1,
-                move_class=move_class,
-                ts=datetime.now().isoformat()
-            )
-            for skill in skills_present:
-                s.run(
+            with s.begin_transaction() as tx:
+                tx.run(
                     """
                     MATCH (g:Game {id: $game_id})
-                    MATCH (g)-[:HAS_MOVE]->(m:Move {move_number: $move_num})
-                    MATCH (sk:Skill {name: $skill})
-                    MERGE (m)-[:INVOLVES]->(sk)
+                    CREATE (m:Move {
+                        move_number: $move_num, uci: $uci,
+                        fen_before: $fen, player_found_best: $best,
+                        cp_loss: $cp_loss, move_class: $move_class,
+                        recorded_at: $ts
+                    })
+                    CREATE (g)-[:HAS_MOVE]->(m)
                     """,
-                    game_id=game_id, move_num=move_number, skill=skill
+                    game_id=game_id, move_num=move_number, uci=uci,
+                    fen=fen_before, best=player_found_best,
+                    cp_loss=cp_loss if cp_loss is not None else -1,
+                    move_class=move_class, ts=datetime.now().isoformat()
                 )
+                for skill in skills_present:
+                    tx.run(
+                        """
+                        MATCH (g:Game {id: $game_id})-[:HAS_MOVE]->(m:Move {move_number: $move_num})
+                        MATCH (sk:Skill {name: $skill})
+                        MERGE (m)-[:INVOLVES]->(sk)
+                        """,
+                        game_id=game_id, move_num=move_number, skill=skill
+                    )
+                tx.commit()
 
     def update_player_skill(self, player_id: str, skill_name: str,
                              success: bool):
