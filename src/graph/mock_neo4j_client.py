@@ -9,7 +9,6 @@ but the dashboard and game flow work exactly as normal.
 """
 
 from datetime import datetime
-import uuid
 
 
 class MockNeo4jClient:
@@ -22,7 +21,10 @@ class MockNeo4jClient:
         self._players:  dict = {}
         self._games:    dict = {}
         self._moves:    list = []
-        self._perf:     dict = {}   # {(player_id, skill): {attempts, successes, irt_ability}}
+        # Stores per-(player, skill): {attempts, successes, irt_ability, difficulty}
+        # Both irt_ability AND difficulty are now persisted so that
+        # update_irt_params() is not a no-op in mock mode.
+        self._perf:     dict = {}
         self._skills:   list = [
             "Pin", "Fork", "Discovery", "Skewer",
             "Checkmate_pattern", "Endgame", "Opening",
@@ -78,21 +80,26 @@ class MockNeo4jClient:
                     skills_present, player_found_best,
                     cp_loss=None, move_class="unknown"):
         self._moves.append({
-            "game_id":          game_id,
-            "move_number":      move_number,
-            "uci":              uci,
-            "fen_before":       fen_before,
-            "skills_present":   skills_present,
+            "game_id":           game_id,
+            "move_number":       move_number,
+            "uci":               uci,
+            "fen_before":        fen_before,
+            "skills_present":    skills_present,
             "player_found_best": player_found_best,
-            "cp_loss":          cp_loss,
-            "move_class":       move_class,
-            "recorded_at":      datetime.now().isoformat(),
+            "cp_loss":           cp_loss,
+            "move_class":        move_class,
+            "recorded_at":       datetime.now().isoformat(),
         })
 
     def update_player_skill(self, player_id: str, skill_name: str, success: bool):
         key = (player_id, skill_name)
         if key not in self._perf:
-            self._perf[key] = {"attempts": 0, "successes": 0, "irt_ability": 0.0}
+            self._perf[key] = {
+                "attempts":    0,
+                "successes":   0,
+                "irt_ability": 0.0,
+                "difficulty":  0.5,   # persisted so IRT updates accumulate
+            }
         self._perf[key]["attempts"]  += 1
         self._perf[key]["successes"] += 1 if success else 0
 
@@ -106,14 +113,16 @@ class MockNeo4jClient:
             "attempts":    p["attempts"],
             "successes":   p["successes"],
             "irt_ability": p["irt_ability"],
-            "difficulty":  0.5,
+            "difficulty":  p["difficulty"],   # returns the live value, not hardcoded 0.5
         }
 
     def update_irt_params(self, player_id: str, skill_name: str,
                            new_ability: float, new_difficulty: float):
+        """Persist both IRT ability and difficulty (was only storing ability before)."""
         key = (player_id, skill_name)
         if key in self._perf:
             self._perf[key]["irt_ability"] = new_ability
+            self._perf[key]["difficulty"]  = new_difficulty   # FIX: was missing
 
     # ------------------------------------------------------------------
     # Queries
@@ -129,7 +138,7 @@ class MockNeo4jClient:
                 "attempts":    p["attempts"],
                 "successes":   p["successes"],
                 "irt_ability": p["irt_ability"],
-                "difficulty":  0.5,
+                "difficulty":  p["difficulty"],
             })
         return sorted(results, key=lambda x: -x["attempts"])
 

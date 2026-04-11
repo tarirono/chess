@@ -266,26 +266,40 @@ Move quality (best / good / inaccuracy / mistake / blunder) is determined by Sto
 
 Start all three services in separate terminals:
 
-**Terminal 1 — Bot API**
+**Terminal 1 — Bot API (Phase B)**
 ```bash
 conda activate chess-env
-uvicorn src.api.app:app --port 8087
+uvicorn src.api.bot_api:app --port 8087
 ```
+Interactive API docs available at: `http://localhost:8087/docs`
 
-**Terminal 2 — Dashboard**
+**Terminal 2 — Dashboard (Phase A + C)**
 ```bash
 conda activate chess-env
 python src/dashboard/app.py
 ```
+Open `http://127.0.0.1:5000` in your browser.
 
-**Terminal 3 — Camera (optional)**
+**Terminal 3 — Camera (optional, Phase A)**
 ```bash
 conda activate chess-env
 python scripts/run_vision.py
 ```
+Camera index is read from `CAMERA_INDEX` in your `.env` file (default: 0).
 
-Open `http://127.0.0.1:5000` in your browser. The dashboard shows a **Neo4j: connected / mock mode** status pill in the top bar so you always know which mode is active.
+---
 
+## Service summary
+
+| Service | File | Port | Purpose |
+|---|---|---|---|
+| Bot API | `src/api/bot_api.py` | 8087 | Phase B — behavioral cloning move engine (FastAPI) |
+| Dashboard | `src/dashboard/app.py` | 5000 | Phase A + C — live board, skills, PGN (Flask) |
+| Camera | `scripts/run_vision.py` | — | Phase A — live webcam pipeline (standalone) |
+
+> **Note:** `src/api/bot_api.py` is the FastAPI bot service only.  
+> `src/dashboard/app.py` is the Flask web dashboard only.  
+> These are separate services on separate ports — do not mix them up.
 ---
 
 ## Model Weights

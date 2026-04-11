@@ -2,12 +2,23 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+import os
 import chess
 import requests
 import threading
+from dotenv import load_dotenv
 from src.graph.skill_tree import SkillTree
 
-BOT_API_URL = "http://127.0.0.1:8087"
+load_dotenv()
+
+# Read from .env so the URL is not hardcoded — change BOT_API_URL in .env
+# to point at a remote host or a different port if needed.
+BOT_API_URL = os.getenv("BOT_API_URL", "http://127.0.0.1:8087")
+
+# temperature > 1.0 widens the softmax distribution over legal moves so the
+# bot occasionally picks slightly sub-optimal moves — intentional human-variance
+# simulation.  1.1 keeps the bot feeling natural without becoming random.
+BOT_TEMPERATURE = float(os.getenv("BOT_TEMPERATURE", "1.1"))
 
 
 class GameManager:
@@ -38,7 +49,7 @@ class GameManager:
         self.status     = "not_started"
 
         self._vision_thread: threading.Thread | None = None
-        self._vision_loop   = None  # set by start_vision_thread
+        self._vision_loop   = None
         self._vision_lock   = threading.Lock()
 
         # Phase C
@@ -55,7 +66,8 @@ class GameManager:
 
         print(
             f"GameManager ready — player: {player_id} "
-            f"(Elo {player_elo}), bot bracket: {self.bot_bracket}"
+            f"(Elo {player_elo}), bot bracket: {self.bot_bracket}\n"
+            f"  Bot API: {BOT_API_URL}  temperature: {BOT_TEMPERATURE}"
         )
 
     # ------------------------------------------------------------------
@@ -63,7 +75,6 @@ class GameManager:
     # ------------------------------------------------------------------
 
     def start_game(self) -> dict:
-        """Start a new game. Returns full state dict."""
         self.board      = chess.Board()
         self.move_count = 0
         self.pgn_moves  = []
@@ -76,16 +87,10 @@ class GameManager:
         return self._state()
 
     def player_move(self, uci: str) -> dict:
-        """
-        Process a player move from manual input OR from VisionLoop.
-        Thread-safe via _vision_lock.
-        Returns game state dict.
-        """
         with self._vision_lock:
             return self._apply_player_move(uci)
 
     def _apply_player_move(self, uci: str) -> dict:
-        """Internal (already under lock)."""
         if self.status != "in_progress":
             return {"error": "Game not in progress"}
 
@@ -97,7 +102,6 @@ class GameManager:
         if move not in self.board.legal_moves:
             return {"error": f"Illegal move: {uci}"}
 
-        # Record in Phase C (now returns dict with cp_loss, move_class)
         self.move_count += 1
         board_before = self.board.copy()
         analysis = self.skill_tree.record_player_move(
@@ -111,7 +115,6 @@ class GameManager:
         cp_loss    = analysis["cp_loss"]
         move_class = analysis["move_class"]
 
-        # Push player move
         san = self.board.san(move)
         self.board.push(move)
         self.pgn_moves.append(san)
@@ -138,7 +141,6 @@ class GameManager:
                 cp_loss=cp_loss,
             )
 
-        # Get bot response
         bot_result = self._get_bot_move()
         if "error" in bot_result:
             return bot_result
@@ -170,38 +172,37 @@ class GameManager:
         )
 
     # ------------------------------------------------------------------
-    # Phase A integration — VisionLoop in background thread
+    # Phase A — VisionLoop in background thread
     # ------------------------------------------------------------------
 
-    def start_vision_thread(self, camera_index: int = 0) -> None:
+    def start_vision_thread(self, camera_index: int | None = None) -> None:
         """
-        Start Phase A (camera pipeline) in a background thread.
-        Detected moves are automatically forwarded to player_move().
-
-        Call this AFTER start_game().
+        Start Phase A camera pipeline in a background thread.
+        camera_index defaults to CAMERA_INDEX from .env (fallback: 0).
         """
         if self._vision_thread and self._vision_thread.is_alive():
             print("Vision thread already running.")
             return
 
-        # Import here to avoid breaking the class when OpenCV is missing
+        if camera_index is None:
+            camera_index = int(os.getenv("CAMERA_INDEX", "0"))
+
         from src.vision.vision_loop import VisionLoop
 
         def _vision_callback(uci: str):
-            """Called by VisionLoop when a move is detected."""
             print(f"[VisionLoop] Move detected: {uci}")
             result = self.player_move(uci)
             if result.get("error"):
                 print(f"[VisionLoop] Move rejected: {result['error']}")
             elif result.get("game_over"):
-                print(f"[VisionLoop] Game over — stopping vision thread")
+                print("[VisionLoop] Game over — stopping vision thread")
                 if self._vision_loop:
                     self._vision_loop.stop()
 
         loop = VisionLoop(
             camera_index=camera_index,
             show_preview=True,
-            on_move_detected=_vision_callback,  # NEW callback
+            on_move_detected=_vision_callback,
         )
         self._vision_loop = loop
 
@@ -214,7 +215,6 @@ class GameManager:
         print(f"Vision thread started (camera {camera_index}).")
 
     def stop_vision_thread(self) -> None:
-        """Gracefully stop the vision thread."""
         if self._vision_loop:
             self._vision_loop.stop()
         if self._vision_thread:
@@ -226,14 +226,13 @@ class GameManager:
     # ------------------------------------------------------------------
 
     def _get_bot_move(self) -> dict:
-        """Call Phase B API for bot move."""
         try:
             resp = requests.post(
                 f"{BOT_API_URL}/move",
                 json={
                     "fen":         self.board.fen(),
                     "elo":         self.player_elo,
-                    "temperature": 1.1,
+                    "temperature": BOT_TEMPERATURE,
                 },
                 timeout=10,
             )
@@ -254,8 +253,8 @@ class GameManager:
             print(f"  Bot move {self.move_count}: {bot_uci} ({bot_san})")
 
             return {
-                "uci":      bot_uci,
-                "san":      bot_san,
+                "uci":       bot_uci,
+                "san":       bot_san,
                 "game_over": self.board.is_game_over(),
             }
 
@@ -305,13 +304,13 @@ class GameManager:
 
     def _state(
         self,
-        last_player_move: str       = None,
-        last_bot_move:    str       = None,
-        skills_detected:  list      = None,
-        move_class:       str       = "unknown",
+        last_player_move: str        = None,
+        last_bot_move:    str        = None,
+        skills_detected:  list       = None,
+        move_class:       str        = "unknown",
         cp_loss:          int | None = None,
-        game_over:        bool      = False,
-        result:           str       = None,
+        game_over:        bool       = False,
+        result:           str        = None,
     ) -> dict:
         return {
             "game_id":          self.game_id,
