@@ -7,6 +7,7 @@
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 <link rel="stylesheet"
       href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='custom.css') }}">
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
 <style>
@@ -50,6 +51,11 @@
   .cp-badge { font-family:monospace; font-size:11px; color:#888; margin-left:6px; }
   .camera-active { animation: pulse 2s infinite; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+  /* Neo4j status pill */
+  .db-pill { font-size:11px; padding:2px 10px; border-radius:20px; }
+  .db-ok   { background:#1a3a1a; color:#5cb85c; }
+  .db-mock { background:#3a2a1a; color:#e0a050; }
+  .db-err  { background:#4a1a1a; color:#e05050; }
 </style>
 </head>
 <body>
@@ -57,7 +63,10 @@
 
   <div class="d-flex align-items-center justify-content-between mb-3 px-2">
     <h1>♟ Chess Ecosystem — PFE 2025</h1>
-    <div id="camera-status" class="small" style="color:#888">Camera: off</div>
+    <div class="d-flex align-items-center gap-3">
+      <span id="db-status" class="db-pill db-mock">DB: checking…</span>
+      <div id="camera-status" class="small" style="color:#888">Camera: off</div>
+    </div>
   </div>
 
   <div class="row g-3">
@@ -85,6 +94,8 @@
         <div id="game-status" class="text-center mt-2 status-waiting small">
           No active game
         </div>
+        <!-- Error banner (shown when Neo4j is down) -->
+        <div id="error-banner" class="mt-2 small text-warning" style="display:none"></div>
       </div>
 
       <div class="card p-3">
@@ -139,7 +150,6 @@
         </button>
       </div>
 
-      <!-- Elo validation results panel (populated if validation was run) -->
       <div class="card p-3" id="elo-panel" style="display:none">
         <div class="card-title">Elo Validation</div>
         <div id="elo-results" class="small">—</div>
@@ -154,9 +164,29 @@ let board       = null;
 let cameraOn    = false;
 let pollTimer   = null;
 
-// ----------------------------------------------------------------
-// Board
-// ----------------------------------------------------------------
+// ── DB status check ────────────────────────────────────────────────
+function checkDbStatus() {
+  fetch('/api/status')
+  .then(r => r.json())
+  .then(data => {
+    const pill = document.getElementById('db-status');
+    if (data.neo4j && data.neo4j.ok) {
+      pill.textContent = 'Neo4j: connected';
+      pill.className   = 'db-pill db-ok';
+    } else {
+      pill.textContent = 'Neo4j: mock mode';
+      pill.className   = 'db-pill db-mock';
+      pill.title       = data.neo4j ? data.neo4j.msg : 'unavailable';
+    }
+  })
+  .catch(() => {
+    const pill = document.getElementById('db-status');
+    pill.textContent = 'DB: unknown';
+    pill.className   = 'db-pill db-err';
+  });
+}
+
+// ── Board ──────────────────────────────────────────────────────────
 function initBoard(fen) {
   const cfg = {
     position:   fen || 'start',
@@ -166,12 +196,11 @@ function initBoard(fen) {
   else       { board = Chessboard('board', cfg); }
 }
 
-// ----------------------------------------------------------------
-// New game
-// ----------------------------------------------------------------
+// ── New game ───────────────────────────────────────────────────────
 function newGame() {
   const pid = document.getElementById('player-id').value || 'player_1';
   const elo = parseInt(document.getElementById('player-elo').value);
+  document.getElementById('error-banner').style.display = 'none';
 
   fetch('/api/new_game', {
     method:  'POST',
@@ -180,19 +209,24 @@ function newGame() {
   })
   .then(r => r.json())
   .then(state => {
+    if (state.error) {
+      const banner = document.getElementById('error-banner');
+      banner.textContent  = '⚠ ' + state.error + (state.hint ? ' — ' + state.hint : '');
+      banner.style.display = 'block';
+      return;
+    }
     updateUI(state);
     document.getElementById('game-status').textContent =
       'Game ' + state.game_id + ' — Active';
     document.getElementById('game-status').className =
       'text-center mt-2 status-active small';
     loadEloValidation();
+    checkDbStatus();
   })
   .catch(e => console.error('newGame error:', e));
 }
 
-// ----------------------------------------------------------------
-// Manual move
-// ----------------------------------------------------------------
+// ── Manual move ────────────────────────────────────────────────────
 function makeMove() {
   const uci = document.getElementById('move-input').value.trim().toLowerCase();
   document.getElementById('move-error').textContent = '';
@@ -220,12 +254,10 @@ function makeMove() {
   .catch(e => console.error('makeMove error:', e));
 }
 
-// ----------------------------------------------------------------
-// Camera toggle (starts/stops Phase A vision thread via API)
-// ----------------------------------------------------------------
+// ── Camera toggle ──────────────────────────────────────────────────
 function toggleCamera() {
   cameraOn = !cameraOn;
-  const btn = document.getElementById('camera-btn');
+  const btn    = document.getElementById('camera-btn');
   const status = document.getElementById('camera-status');
 
   if (cameraOn) {
@@ -236,7 +268,6 @@ function toggleCamera() {
       btn.classList.add('camera-active');
       status.textContent = 'Camera: active — moves auto-detected';
       status.style.color = '#5cb85c';
-      // Poll state every 1.5s to reflect camera-detected moves
       pollTimer = setInterval(pollState, 1500);
     });
   } else {
@@ -255,9 +286,7 @@ function pollState() {
   .catch(() => {});
 }
 
-// ----------------------------------------------------------------
-// UI update
-// ----------------------------------------------------------------
+// ── UI update ──────────────────────────────────────────────────────
 function moveClassBadge(cls) {
   const safe = (cls || 'unknown').replace(/[^a-z]/g, '');
   return '<span class="badge-' + safe + '">' + (cls || '?') + '</span>';
@@ -271,7 +300,6 @@ function updateUI(state) {
 
   document.getElementById('pgn-box').textContent = state.pgn || '—';
 
-  // Last move analysis panel
   if (state.last_entry) {
     const e = state.last_entry;
     const skills = (e.skills || []).map(s => '<span class="badge-skill">' + s + '</span>').join('');
@@ -282,7 +310,6 @@ function updateUI(state) {
       '<div style="margin-top:4px">' + (skills || '<span style="color:#666">—</span>') + '</div>';
   }
 
-  // Move history
   const hist = state.history || [];
   document.getElementById('move-history').innerHTML = hist.map(h => {
     const cpStr = (h.cp_loss != null && h.cp_loss >= 0)
@@ -296,7 +323,6 @@ function updateUI(state) {
       '</div>';
   }).join('') || '—';
 
-  // ZPD
   if (state.zpd && state.zpd.length > 0) {
     document.getElementById('zpd-recs').innerHTML = state.zpd.map(z => {
       const pct = Math.round(z.probability * 100);
@@ -368,6 +394,7 @@ function loadEloValidation() {
 
 $(document).ready(function() {
   initBoard('start');
+  checkDbStatus();
   $('#move-input').on('keypress', function(e) {
     if (e.key === 'Enter') makeMove();
   });

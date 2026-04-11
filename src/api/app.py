@@ -1,57 +1,169 @@
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from src.api.move_service import MoveService
+ROOT = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(ROOT))
 
-app = FastAPI(
-    title="Chess Bot Move Service",
-    description="Phase B — Behavioral cloning bot API",
-    version="1.0.0"
+import json
+from flask import Flask, render_template, request, jsonify
+
+app = Flask(
+    __name__,
+    template_folder=str(ROOT / "src" / "dashboard" / "templates"),
+    static_folder=str(ROOT / "src" / "dashboard" / "static"),
 )
 
-# Load models once at startup
-service = MoveService()
+# ── Lazy-load GameManager so dashboard starts even without Neo4j ──────
+manager = None
+_init_error: str | None = None
 
 
-class MoveRequest(BaseModel):
-    fen:         str
-    elo:         int   = 1400
-    temperature: float = 1.0
-
-
-class MoveResponse(BaseModel):
-    uci:     str
-    bracket: str
-    conf:    float
-
-
-@app.get("/health")
-def health():
-    return {
-        "status":   "ok",
-        "brackets": list(service.models.keys())
-    }
-
-
-@app.post("/move", response_model=MoveResponse)
-def get_move(req: MoveRequest):
+def _make_manager(player_id: str, elo: int):
+    """
+    Try to build a real GameManager (requires Neo4j + Stockfish).
+    Returns (manager, error_string).  error_string is None on success.
+    """
     try:
-        result = service.get_move(
-            fen=req.fen,
-            elo=req.elo,
-            temperature=req.temperature
+        from src.integration.game_manager import GameManager
+        mgr = GameManager(player_id=player_id, player_elo=elo)
+        return mgr, None
+    except Exception as e:
+        return None, str(e)
+
+
+# ── Routes ────────────────────────────────────────────────────────────
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+@app.route("/api/status")
+def status():
+    """Health-check endpoint so the UI can show whether Neo4j is up."""
+    try:
+        from neo4j import GraphDatabase
+        import os
+        from dotenv import load_dotenv
+        load_dotenv()
+        driver = GraphDatabase.driver(
+            os.getenv("NEO4J_URI",      "neo4j://127.0.0.1:7687"),
+            auth=(
+                os.getenv("NEO4J_USER",     "neo4j"),
+                os.getenv("NEO4J_PASSWORD", "chess123"),
+            ),
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        driver.verify_connectivity()
+        driver.close()
+        neo4j_ok = True
+        neo4j_msg = "connected"
+    except Exception as e:
+        neo4j_ok  = False
+        neo4j_msg = str(e)
 
-    if result.get("uci") is None:
-        raise HTTPException(status_code=422, detail="Game is already over.")
+    return jsonify({
+        "neo4j":   {"ok": neo4j_ok,  "msg": neo4j_msg},
+        "version": "1.0.0",
+    })
 
-    return MoveResponse(
-        uci=result["uci"],
-        bracket=result["bracket"],
-        conf=result["conf"]
-    )
+
+@app.route("/api/new_game", methods=["POST"])
+def new_game():
+    global manager
+    data      = request.get_json(force=True) or {}
+    player_id = data.get("player_id", "player_1")
+    elo       = int(data.get("elo", 1400))
+
+    if manager:
+        try:
+            manager.close()
+        except Exception:
+            pass
+
+    mgr, err = _make_manager(player_id, elo)
+    if err:
+        return jsonify({
+            "error": f"Could not start game: {err}",
+            "hint":  "Make sure Neo4j is running and your .env is configured.",
+        }), 503
+
+    manager = mgr
+    manager.start_game()
+    return jsonify(manager.get_state())
+
+
+@app.route("/api/move", methods=["POST"])
+def make_move():
+    global manager
+    if manager is None:
+        return jsonify({"error": "No active game. Start one first."}), 400
+    data  = request.get_json(force=True) or {}
+    uci   = data.get("uci", "")
+    state = manager.player_move(uci)
+    return jsonify(state)
+
+
+@app.route("/api/state")
+def get_state():
+    global manager
+    if manager is None:
+        return jsonify({"error": "No active game"}), 400
+    return jsonify(manager.get_state())
+
+
+@app.route("/api/skills")
+def get_skills():
+    global manager
+    if manager is None:
+        return jsonify({"error": "No active game"}), 400
+    return jsonify(manager.get_skill_summary())
+
+
+# ── Phase A camera endpoints ──────────────────────────────────────────
+
+@app.route("/api/camera/start", methods=["POST"])
+def camera_start():
+    global manager
+    if manager is None:
+        return jsonify({"error": "Start a game first"}), 400
+    if manager.status != "in_progress":
+        return jsonify({"error": "Game not in progress"}), 400
+    try:
+        data         = request.get_json(force=True) or {}
+        camera_index = int(data.get("camera_index", 0))
+        manager.start_vision_thread(camera_index=camera_index)
+        return jsonify({"status": "camera started", "camera_index": camera_index})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/camera/stop", methods=["POST"])
+def camera_stop():
+    global manager
+    if manager is None:
+        return jsonify({"error": "No active game"}), 400
+    manager.stop_vision_thread()
+    return jsonify({"status": "camera stopped"})
+
+
+# ── Elo validation ────────────────────────────────────────────────────
+
+@app.route("/api/elo_validation")
+def elo_validation():
+    path = ROOT / "data" / "models" / "behavioral" / "elo_validation.json"
+    if not path.exists():
+        return jsonify({
+            "error": "No validation results found.",
+            "hint":  "Run:  python scripts/validate_elo.py",
+        }), 404
+    with open(path) as f:
+        return jsonify(json.load(f))
+
+
+# ── Entry point ───────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    print(f"Dashboard starting — http://127.0.0.1:5000")
+    print(f"Templates : {ROOT / 'src' / 'dashboard' / 'templates'}")
+    print(f"Static    : {ROOT / 'src' / 'dashboard' / 'static'}")
+    app.run(debug=True, port=5000, use_reloader=False)

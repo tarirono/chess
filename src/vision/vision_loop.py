@@ -13,11 +13,18 @@ from src.vision.board_localizer import BoardLocalizer
 from src.vision.fen_extractor import detections_to_fen
 from src.vision.motion_detector import MotionDetector
 
+# Directory where live PGN files are written
+PGN_OUTPUT_DIR = Path("data/pgn")
+
 
 class VisionLoop:
     """
     Main Phase A loop:
       Camera → Motion detection → YOLO inference → FEN → PGN
+
+    Every detected move is immediately appended to a live PGN file so the
+    game is always on disk (spec requirement).  The file is named with the
+    session timestamp, e.g. data/pgn/game_143022.pgn.
 
     Phase A+C integration:
         Provide on_move_detected callback to wire directly into GameManager.
@@ -39,7 +46,7 @@ class VisionLoop:
     ):
         self.camera_index     = camera_index
         self.show_preview     = show_preview
-        self.on_move_detected = on_move_detected  # callback for Phase A+C wiring
+        self.on_move_detected = on_move_detected
 
         self.localizer  = BoardLocalizer()
         self.detector   = PieceDetector(conf=0.45)
@@ -53,7 +60,20 @@ class VisionLoop:
         self.move_count = 0
         self._running   = False
 
+        # PGN auto-write setup
+        PGN_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        self._session_ts  = datetime.now().strftime("%H%M%S")
+        self._pgn_path    = PGN_OUTPUT_DIR / f"game_{self._session_ts}.pgn"
+        self._pgn_game    = chess.pgn.Game()
+        self._pgn_game.headers["Event"] = "Chess Ecosystem — Vision Session"
+        self._pgn_game.headers["Site"]  = "Local"
+        self._pgn_game.headers["Date"]  = datetime.now().strftime("%Y.%m.%d")
+        self._pgn_game.headers["White"] = "Player"
+        self._pgn_game.headers["Black"] = "Bot"
+        self._pgn_node    = self._pgn_game   # current node in the PGN tree
+
         print("VisionLoop initialised.")
+        print(f"Live PGN output: {self._pgn_path}")
 
     # ------------------------------------------------------------------
     # Stop signal
@@ -62,6 +82,24 @@ class VisionLoop:
     def stop(self):
         """Signal the run loop to exit cleanly."""
         self._running = False
+
+    # ------------------------------------------------------------------
+    # PGN auto-write
+    # ------------------------------------------------------------------
+
+    def _append_move_to_pgn(self, move: chess.Move) -> None:
+        """
+        Add move to the in-memory PGN tree and immediately overwrite the
+        PGN file on disk.  This ensures the file is always up to date even
+        if the session ends unexpectedly.
+        """
+        self._pgn_node = self._pgn_node.add_variation(move)
+        self._write_pgn()
+
+    def _write_pgn(self) -> None:
+        """Overwrite the PGN file with the current game state."""
+        with open(self._pgn_path, "w") as f:
+            print(self._pgn_game, file=f, end="\n\n")
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -93,6 +131,7 @@ class VisionLoop:
         return None
 
     def _save_snapshot(self):
+        """Manual snapshot triggered by pressing 's'."""
         timestamp = datetime.now().strftime("%H%M%S")
         out_dir   = Path("data/raw")
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -102,25 +141,8 @@ class VisionLoop:
             fen_path.write_text(self.prev_fen)
             print(f"FEN saved to {fen_path}")
 
-        if self.board.move_stack:
-            game = chess.pgn.Game()
-            game.headers["Event"] = "Chess Ecosystem — Vision Session"
-            game.headers["Date"]  = datetime.now().strftime("%Y.%m.%d")
-            game.headers["White"] = "Player"
-            game.headers["Black"] = "Bot"
-
-            node = game
-            tmp  = chess.Board()
-            for move in self.board.move_stack:
-                node = node.add_variation(move)
-                tmp.push(move)
-
-            pgn_path = out_dir / f"game_{timestamp}.pgn"
-            with open(pgn_path, "w") as f:
-                print(game, file=f, end="\n\n")
-            print(f"PGN saved to {pgn_path}")
-        else:
-            print("No moves recorded yet — PGN not saved.")
+        # PGN is already being written continuously — just report path
+        print(f"Live PGN is at: {self._pgn_path}  ({self.move_count} moves)")
 
     # ------------------------------------------------------------------
     # Main loop
@@ -133,7 +155,7 @@ class VisionLoop:
             raise RuntimeError(f"Cannot open camera {self.camera_index}")
 
         self._running = True
-        print("Camera opened. Press 'q' to quit, 's' to save FEN + PGN.\n")
+        print("Camera opened. Press 'q' to quit, 's' to print FEN + PGN path.\n")
         if self.on_move_detected:
             print("Phase A→C integration active: detected moves → GameManager\n")
 
@@ -144,6 +166,9 @@ class VisionLoop:
         h, w = first_frame.shape[:2]
         corners = self.localizer.get_corners() or (0, 0, w, h)
         print(f"Using board corners: {corners}\n")
+
+        # Write empty PGN header so the file exists from the start
+        self._write_pgn()
 
         inference_count = 0
 
@@ -161,9 +186,11 @@ class VisionLoop:
                             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
                 cv2.putText(frame, f"Moves detected: {self.move_count}",
                             (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                cv2.putText(frame, f"PGN: {self._pgn_path.name}",
+                            (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 0), 1)
                 if self.on_move_detected:
                     cv2.putText(frame, "A+C INTEGRATED",
-                                (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                                (10, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
                 x1, y1, x2, y2 = corners
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
@@ -179,14 +206,17 @@ class VisionLoop:
                     move_uci = self._fen_to_move(new_fen)
                     if move_uci:
                         self.move_count += 1
+                        move_obj = chess.Move.from_uci(move_uci)
                         print(f"  Move detected: {move_uci} (move #{self.move_count})")
 
-                        # --- Phase A + C integration ---
+                        # ── Auto-write PGN immediately ───────────────
+                        self._append_move_to_pgn(move_obj)
+                        print(f"  PGN updated: {self._pgn_path}")
+
+                        # ── Phase A + C integration ──────────────────
                         if self.on_move_detected:
-                            # Forward to GameManager (handles Phase B + C)
                             self.on_move_detected(move_uci)
                         else:
-                            # Standalone mode: just track the board locally
                             try:
                                 self.board.push_uci(move_uci)
                                 print(f"  PGN so far: "
@@ -208,4 +238,5 @@ class VisionLoop:
         cap.release()
         cv2.destroyAllWindows()
         print(f"\nSession ended. Total moves detected: {self.move_count}")
+        print(f"Final PGN saved at: {self._pgn_path}")
         return self.board
