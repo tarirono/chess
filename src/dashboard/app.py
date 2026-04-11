@@ -5,6 +5,7 @@ ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 import json
+import os
 from flask import Flask, render_template, request, jsonify
 from src.integration.game_manager import GameManager
 
@@ -21,6 +22,42 @@ manager: GameManager = None
 def index():
     return render_template("index.html")
 
+
+# ------------------------------------------------------------------
+# Health / status — used by the dashboard Neo4j pill
+# ------------------------------------------------------------------
+
+@app.route("/api/status")
+def status():
+    """Liveness check + Neo4j connectivity used by the DB status pill."""
+    try:
+        from neo4j import GraphDatabase
+        from dotenv import load_dotenv
+        load_dotenv()
+        driver = GraphDatabase.driver(
+            os.getenv("NEO4J_URI",      "neo4j://127.0.0.1:7687"),
+            auth=(
+                os.getenv("NEO4J_USER",     "neo4j"),
+                os.getenv("NEO4J_PASSWORD", "chess123"),
+            ),
+        )
+        driver.verify_connectivity()
+        driver.close()
+        neo4j_ok  = True
+        neo4j_msg = "connected"
+    except Exception as e:
+        neo4j_ok  = False
+        neo4j_msg = str(e)
+
+    return jsonify({
+        "neo4j":   {"ok": neo4j_ok, "msg": neo4j_msg},
+        "version": "1.0.0",
+    })
+
+
+# ------------------------------------------------------------------
+# Game
+# ------------------------------------------------------------------
 
 @app.route("/api/new_game", methods=["POST"])
 def new_game():
