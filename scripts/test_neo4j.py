@@ -4,9 +4,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from neo4j import GraphDatabase
 
-URI      = "neo4j://127.0.0.1:7687"
-USER     = "neo4j"
-PASSWORD = "chess123"
+from dotenv import load_dotenv
+import os
+load_dotenv()
+URI      = os.getenv("NEO4J_URI",      "neo4j://127.0.0.1:7687")
+USER     = os.getenv("NEO4J_USER",     "neo4j")
+PASSWORD = os.getenv("NEO4J_PASSWORD", "chess123")
 
 try:
     driver = GraphDatabase.driver(URI, auth=(USER, PASSWORD))
