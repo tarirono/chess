@@ -7,6 +7,7 @@ sys.path.insert(0, str(ROOT))
 import json
 import os
 from flask import Flask, render_template, request, jsonify
+from flask_socketio import SocketIO
 from src.integration.game_manager import GameManager
 
 app = Flask(
@@ -14,8 +15,13 @@ app = Flask(
     template_folder=str(ROOT / "src" / "dashboard" / "templates"),
     static_folder=str(ROOT / "src" / "dashboard" / "static")
 )
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 manager: GameManager = None
+
+
+def _emit_state_update(state: dict) -> None:
+    socketio.emit("state_update", state)
 
 
 @app.route("/")
@@ -67,7 +73,11 @@ def new_game():
     elo       = int(data.get("elo", 1400))
     if manager:
         manager.close()
-    manager = GameManager(player_id=player_id, player_elo=elo)
+    manager = GameManager(
+        player_id=player_id,
+        player_elo=elo,
+        state_callback=_emit_state_update,
+    )
     manager.start_game()
     return jsonify(manager.get_state())
 
@@ -143,4 +153,4 @@ def elo_validation():
 
 if __name__ == "__main__":
     print(f"Dashboard running — templates: {ROOT / 'src' / 'dashboard' / 'templates'}")
-    app.run(debug=True, port=5000, use_reloader=False)
+    socketio.run(app, debug=True, port=5000, use_reloader=False)

@@ -113,6 +113,9 @@ class MoveService:
             return {"uci": None, "bracket": bracket, "conf": 0.0,
                     "reason": "game over"}
 
+        if temperature <= 0:
+            raise ValueError("temperature must be > 0")
+
         tensor     = board_to_tensor(board)
         legal_mask = self._legal_mask(board)
 
@@ -125,7 +128,7 @@ class MoveService:
                 logits = logits / temperature
 
             probs      = torch.softmax(logits, dim=0)
-            move_index = probs.argmax().item()
+            move_index = torch.multinomial(probs, 1).item()
             conf       = probs[move_index].item()
 
         move = index_to_move(move_index)

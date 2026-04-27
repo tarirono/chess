@@ -44,7 +44,10 @@ class Neo4jClient:
         skills = [
             "Pin", "Fork", "Discovery", "Skewer",
             "Checkmate_pattern", "Endgame", "Opening",
-            "Pawn_structure", "Piece_activity", "Blunder","Mistake", "Inaccuracy",
+            "Pawn_structure", "Doubled_pawns", "Isolated_pawn", "Passed_pawn",
+            "Piece_activity", "Development", "Centralization",
+            "Outpost_control", "Open_file_rook",
+            "Blunder","Mistake", "Inaccuracy",
         ]
         with self.driver.session() as s:
             for skill in skills:

@@ -6,6 +6,7 @@ import os
 import chess
 import requests
 import threading
+from typing import Callable
 from dotenv import load_dotenv
 from src.graph.skill_tree import SkillTree
 
@@ -38,7 +39,10 @@ class GameManager:
         # camera moves now flow automatically into the game
     """
 
-    def __init__(self, player_id: str, player_elo: int = 1400):
+    def __init__(self,
+                 player_id: str,
+                 player_elo: int = 1400,
+                 state_callback: Callable[[dict], None] | None = None):
         self.player_id  = player_id
         self.player_elo = player_elo
         self.board      = chess.Board()
@@ -51,6 +55,7 @@ class GameManager:
         self._vision_thread: threading.Thread | None = None
         self._vision_loop   = None
         self._vision_lock   = threading.Lock()
+        self._state_callback = state_callback
 
         # Phase C
         self.skill_tree = SkillTree()
@@ -84,7 +89,9 @@ class GameManager:
             self.player_id, self.player_elo, self.bot_bracket
         )
         print(f"Game started — ID: {self.game_id}")
-        return self._state()
+        state = self._state()
+        self._notify_state(state)
+        return state
 
     def player_move(self, uci: str) -> dict:
         with self._vision_lock:
@@ -163,13 +170,15 @@ class GameManager:
                 cp_loss=cp_loss,
             )
 
-        return self._state(
+        state = self._state(
             last_player_move=uci,
             last_bot_move=bot_result.get("uci"),
             skills_detected=skills,
             move_class=move_class,
             cp_loss=cp_loss,
         )
+        self._notify_state(state)
+        return state
 
     # ------------------------------------------------------------------
     # Phase A — VisionLoop in background thread
@@ -285,7 +294,7 @@ class GameManager:
         self.status = "finished"
         self.skill_tree.db.finish_game(self.game_id, result, self.move_count)
         print(f"Game over — result: {result}")
-        return self._state(
+        state = self._state(
             last_player_move=last_player_move,
             last_bot_move=last_bot_move,
             skills_detected=skills_detected,
@@ -294,6 +303,8 @@ class GameManager:
             game_over=True,
             result=result,
         )
+        self._notify_state(state)
+        return state
 
     # ------------------------------------------------------------------
     # State
@@ -301,6 +312,13 @@ class GameManager:
 
     def get_skill_summary(self) -> dict:
         return self.skill_tree.get_skill_summary(self.player_id)
+
+    def _notify_state(self, state: dict) -> None:
+        if self._state_callback:
+            try:
+                self._state_callback(state)
+            except Exception as e:
+                print(f"State callback error: {e}")
 
     def _state(
         self,

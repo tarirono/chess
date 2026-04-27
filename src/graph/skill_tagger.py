@@ -65,7 +65,9 @@ class SkillTagger:
 
         # ── Pawn structure ────────────────────────────────────────────
 
-        if self._involves_pawn_structure(board, move, board_after):
+        pawn_tags = self._pawn_structure_tags(board, move, board_after)
+        if pawn_tags:
+            tags.update(pawn_tags)
             tags.add("Pawn_structure")
 
         # ── Blunder / mistake / inaccuracy ────────────────────────────
@@ -76,7 +78,11 @@ class SkillTagger:
 
         # ── Piece activity (only when nothing more specific fires) ────
 
-        if self._is_piece_activity(board, move, board_after, tags):
+        activity_tags = self._piece_activity_tags(board, move, board_after)
+        if activity_tags:
+            tags.update(activity_tags)
+            tags.add("Piece_activity")
+        elif self._is_piece_activity(board, move, board_after, tags):
             tags.add("Piece_activity")
 
         # ── Missed tactics (engine only) ──────────────────────────────
@@ -242,64 +248,137 @@ class SkillTagger:
     # Pawn structure detector
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _involves_pawn_structure(board: chess.Board,
-                                 move: chess.Move,
-                                 board_after: chess.Board) -> bool:
-        """
-        True when the move meaningfully changes pawn structure:
-        pawn advance, capture creating passed/isolated/doubled pawns,
-        or en-passant.
-        """
+    def _pawn_structure_tags(self,
+                             board: chess.Board,
+                             move: chess.Move,
+                             board_after: chess.Board) -> set[str]:
         piece = board.piece_at(move.from_square)
         if not piece or piece.piece_type != chess.PAWN:
+            return set()
+
+        tags = set()
+        mover = board.turn
+
+        if self._is_passed_pawn(board_after, move.to_square, mover):
+            tags.add("Passed_pawn")
+
+        if self._is_doubled_pawn(board_after, move.to_square, mover):
+            tags.add("Doubled_pawns")
+
+        if self._is_isolated_pawn(board_after, move.to_square, mover):
+            tags.add("Isolated_pawn")
+
+        return tags
+
+    @staticmethod
+    def _is_passed_pawn(board: chess.Board,
+                        sq: chess.Square,
+                        color: chess.Color) -> bool:
+        piece = board.piece_at(sq)
+        if not piece or piece.piece_type != chess.PAWN or piece.color != color:
             return False
 
-        # Any pawn capture changes structure
-        if board.is_capture(move):
-            return True
+        file_idx = chess.square_file(sq)
+        rank_idx = chess.square_rank(sq)
+        adjacent_files = {f for f in (file_idx - 1, file_idx, file_idx + 1)
+                          if 0 <= f <= 7}
+        for opp_sq in board.pieces(chess.PAWN, not color):
+            if chess.square_file(opp_sq) not in adjacent_files:
+                continue
+            opp_rank = chess.square_rank(opp_sq)
+            if color == chess.WHITE and opp_rank > rank_idx:
+                return False
+            if color == chess.BLACK and opp_rank < rank_idx:
+                return False
+        return True
 
-        # En passant
-        if board.is_en_passant(move):
-            return True
+    @staticmethod
+    def _is_doubled_pawn(board: chess.Board,
+                         sq: chess.Square,
+                         color: chess.Color) -> bool:
+        file_idx = chess.square_file(sq)
+        pawns_on_file = [
+            pawn_sq for pawn_sq in board.pieces(chess.PAWN, color)
+            if chess.square_file(pawn_sq) == file_idx
+        ]
+        return len(pawns_on_file) >= 2
 
-        # Central pawn advance (d/e files)
-        file = chess.square_file(move.to_square)
-        if file in (3, 4):   # d=3, e=4
-            return True
-
-        # Pawn promotion
-        if move.promotion:
-            return True
-
-        # Check if the advance creates a passed pawn
-        mover = board.turn
-        pawns_after = board_after.pieces(chess.PAWN, mover)
-        opp_pawns   = board_after.pieces(chess.PAWN, not mover)
-
-        def is_passed(sq: chess.Square, color: chess.Color) -> bool:
-            f = chess.square_file(sq)
-            r = chess.square_rank(sq)
-            adjacent_files = [f - 1, f, f + 1]
-            if color == chess.WHITE:
-                blocking_ranks = range(r + 1, 8)
-            else:
-                blocking_ranks = range(0, r)
-            opp = board_after.pieces(chess.PAWN, not color)
-            for opp_sq in opp:
-                if chess.square_file(opp_sq) in adjacent_files:
-                    if chess.square_rank(opp_sq) in blocking_ranks:
-                        return False
-            return True
-
-        if is_passed(move.to_square, mover):
-            return True
-
-        return False
+    @staticmethod
+    def _is_isolated_pawn(board: chess.Board,
+                          sq: chess.Square,
+                          color: chess.Color) -> bool:
+        file_idx = chess.square_file(sq)
+        adjacent_files = {file_idx - 1, file_idx + 1}
+        for pawn_sq in board.pieces(chess.PAWN, color):
+            if pawn_sq == sq:
+                continue
+            if chess.square_file(pawn_sq) in adjacent_files:
+                return False
+        return True
 
     # ------------------------------------------------------------------
     # Piece activity detector
     # ------------------------------------------------------------------
+
+    def _piece_activity_tags(self,
+                             board: chess.Board,
+                             move: chess.Move,
+                             board_after: chess.Board) -> set[str]:
+        piece = board.piece_at(move.from_square)
+        if not piece:
+            return set()
+
+        tags = set()
+
+        if piece.piece_type in {chess.KNIGHT, chess.BISHOP}:
+            back_rank = 0 if board.turn == chess.WHITE else 7
+            if chess.square_rank(move.from_square) == back_rank:
+                tags.add("Development")
+
+        central = {chess.C3, chess.C6, chess.D4, chess.D5,
+                   chess.E4, chess.E5, chess.F3, chess.F6}
+        if piece.piece_type != chess.PAWN and move.to_square in central:
+            tags.add("Centralization")
+
+        if piece.piece_type in {chess.KNIGHT, chess.BISHOP}:
+            if self._is_outpost_square(board_after, move.to_square, board.turn):
+                tags.add("Outpost_control")
+
+        if piece.piece_type == chess.ROOK:
+            file_idx = chess.square_file(move.to_square)
+            pawns_on_file = [
+                sq for sq in chess.SQUARES
+                if chess.square_file(sq) == file_idx
+                and (p := board_after.piece_at(sq))
+                and p.piece_type == chess.PAWN
+            ]
+            if not pawns_on_file:
+                tags.add("Open_file_rook")
+
+        return tags
+
+    def _is_outpost_square(self,
+                           board: chess.Board,
+                           sq: chess.Square,
+                           color: chess.Color) -> bool:
+        rank = chess.square_rank(sq)
+        if color == chess.WHITE and rank < 4:
+            return False
+        if color == chess.BLACK and rank > 3:
+            return False
+        return (
+            self._is_attacked_by_pawn(board, color, sq)
+            and not self._is_attacked_by_pawn(board, not color, sq)
+        )
+
+    @staticmethod
+    def _is_attacked_by_pawn(board: chess.Board,
+                             color: chess.Color,
+                             sq: chess.Square) -> bool:
+        for pawn_sq in board.pieces(chess.PAWN, color):
+            if sq in board.attacks(pawn_sq):
+                return True
+        return False
 
     @staticmethod
     def _is_piece_activity(board: chess.Board,

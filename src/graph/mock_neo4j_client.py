@@ -28,7 +28,10 @@ class MockNeo4jClient:
         self._skills:   list = [
             "Pin", "Fork", "Discovery", "Skewer",
             "Checkmate_pattern", "Endgame", "Opening",
-            "Pawn_structure", "Piece_activity", "Blunder", "Mistake", "Inaccuracy",
+            "Pawn_structure", "Doubled_pawns", "Isolated_pawn", "Passed_pawn",
+            "Piece_activity", "Development", "Centralization",
+            "Outpost_control", "Open_file_rook",
+            "Blunder", "Mistake", "Inaccuracy",
         ]
         print("MockNeo4jClient: running in-memory (Neo4j not connected).")
 

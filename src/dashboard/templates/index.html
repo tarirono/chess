@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='custom.css') }}">
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <style>
   body { background:#0f1117; color:#e0e0e0; font-family:'Segoe UI',sans-serif; }
   .card { background:#1a1d27; border:1px solid #2a2d3a; border-radius:12px; }
@@ -62,7 +63,7 @@
 <div class="container-fluid py-3">
 
   <div class="d-flex align-items-center justify-content-between mb-3 px-2">
-    <h1>♟ Chess Ecosystem — PFE 2025</h1>
+    <h1>♟ Chess Ecosystem — PFE 2026</h1>
     <div class="d-flex align-items-center gap-3">
       <span id="db-status" class="db-pill db-mock">DB: checking…</span>
       <div id="camera-status" class="small" style="color:#888">Camera: off</div>
@@ -86,10 +87,9 @@
           <button class="btn btn-primary btn-sm flex-fill" onclick="newGame()">
             Start Game
           </button>
-          <button class="btn btn-warning btn-sm" id="camera-btn"
-                  onclick="toggleCamera()" title="Toggle live camera (Phase A)">
-            📷 Camera
-          </button>
+          <button class="btn btn-warning btn-sm" id="camera-btn" title="Run scripts/run_vision.py in terminal" disabled>
+            📷 Camera (use Terminal)
+         </button>
         </div>
         <div id="game-status" class="text-center mt-2 status-waiting small">
           No active game
@@ -163,6 +163,7 @@
 let board       = null;
 let cameraOn    = false;
 let pollTimer   = null;
+let socket      = null;
 
 // ── DB status check ────────────────────────────────────────────────
 function checkDbStatus() {
@@ -286,6 +287,21 @@ function pollState() {
   .catch(() => {});
 }
 
+function connectSocket() {
+  socket = io();
+
+  socket.on('state_update', (state) => {
+    if (!state || state.error) return;
+    updateUI(state);
+    if (state.status === 'finished') {
+      document.getElementById('game-status').textContent = 'Game finished!';
+      document.getElementById('game-status').className =
+        'text-center mt-2 status-finished small';
+      refreshSkills();
+    }
+  });
+}
+
 // ── UI update ──────────────────────────────────────────────────────
 function moveClassBadge(cls) {
   const safe = (cls || 'unknown').replace(/[^a-z]/g, '');
@@ -394,6 +410,7 @@ function loadEloValidation() {
 
 $(document).ready(function() {
   initBoard('start');
+  connectSocket();
   checkDbStatus();
   $('#move-input').on('keypress', function(e) {
     if (e.key === 'Enter') makeMove();
