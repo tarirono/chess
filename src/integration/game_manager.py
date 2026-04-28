@@ -68,6 +68,7 @@ class GameManager:
             self.bot_bracket = "1400"
         else:
             self.bot_bracket = "1600"
+        self.bot_elo = player_elo
 
         print(
             f"GameManager ready — player: {player_id} "
@@ -230,17 +231,29 @@ class GameManager:
             self._vision_thread.join(timeout=3)
         print("Vision thread stopped.")
 
+    def is_vision_running(self) -> bool:
+        return bool(self._vision_thread and self._vision_thread.is_alive())
+
     # ------------------------------------------------------------------
     # Bot
     # ------------------------------------------------------------------
 
+    def _refresh_bot_profile(self) -> tuple[int, str]:
+        adaptive_elo, adaptive_bracket = self.skill_tree.recommend_bot_bracket(
+            self.player_id, self.player_elo
+        )
+        self.bot_elo = adaptive_elo
+        self.bot_bracket = adaptive_bracket
+        return adaptive_elo, adaptive_bracket
+
     def _get_bot_move(self) -> dict:
         try:
+            adaptive_elo, adaptive_bracket = self._refresh_bot_profile()
             resp = requests.post(
                 f"{BOT_API_URL}/move",
                 json={
                     "fen":         self.board.fen(),
-                    "elo":         self.player_elo,
+                    "elo":         adaptive_elo,
                     "temperature": BOT_TEMPERATURE,
                 },
                 timeout=10,
@@ -262,9 +275,11 @@ class GameManager:
             print(f"  Bot move {self.move_count}: {bot_uci} ({bot_san})")
 
             return {
-                "uci":       bot_uci,
-                "san":       bot_san,
-                "game_over": self.board.is_game_over(),
+                "uci":         bot_uci,
+                "san":         bot_san,
+                "game_over":   self.board.is_game_over(),
+                "bot_elo":     adaptive_elo,
+                "bot_bracket": adaptive_bracket,
             }
 
         except Exception as e:
@@ -335,6 +350,8 @@ class GameManager:
             "fen":              self.board.fen(),
             "pgn":              " ".join(self.pgn_moves),
             "move_count":       self.move_count,
+            "bot_elo":          self.bot_elo,
+            "bot_bracket":      self.bot_bracket,
             "turn":             "white" if self.board.turn else "black",
             "last_player_move": last_player_move,
             "last_bot_move":    last_bot_move,
@@ -344,6 +361,7 @@ class GameManager:
             "game_over":        game_over,
             "result":           result,
             "status":           self.status,
+            "camera_active":    self.is_vision_running(),
             "last_entry": {
                 "skills":      skills_detected or [],
                 "player_move": last_player_move,

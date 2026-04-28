@@ -42,7 +42,7 @@ chess-ecosystem/
 |   |   `-- skill_tree.py         # ZPD recommendations + Neo4j/mock wiring
 |   |-- api/                      # FastAPI bot service
 |   |   |-- move_service.py       # Loads trained models
-|   |   `-- app.py                # /move and /health endpoints
+|   |   `-- bot_api.py            # /move and /health endpoints
 |   |-- integration/              # Phase A + B + C wiring
 |   |   `-- game_manager.py       # Central game orchestrator
 |   `-- dashboard/                # Flask web dashboard
@@ -75,6 +75,8 @@ chess-ecosystem/
 |       `-- lichess/              # Filtered game data
 |-- .gitignore
 |-- env.example                   # Template for .env (never commit .env itself)
+|-- notebooks/
+|   `-- chess.ipynb              # Optional Colab-era training notebook (reference only)
 |-- requirements.txt
 `-- README.md
 ```
@@ -96,6 +98,10 @@ Your `.env` should look like:
 NEO4J_URI=neo4j://127.0.0.1:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=your_password_here
+NEO4J_MOCK=false
+BOT_API_URL=http://127.0.0.1:8087
+BOT_TEMPERATURE=1.1
+CAMERA_INDEX=0
 STOCKFISH_PATH=stockfish
 ```
 
@@ -171,6 +177,7 @@ python scripts/image_to_fen.py path\to\board.jpg
 ```
 
 Saves a warped-board debug preview to `data/raw/_debug_warped_board.jpg`.
+This is a generated troubleshooting artifact and is ignored by git.
 
 ### Run live camera
 
@@ -203,7 +210,7 @@ Trains 3 ResNet models (one per Elo bracket) via behavioral cloning. Best weight
 ### Start the bot API
 
 ```bash
-uvicorn src.api.app:app --reload --port 8087
+uvicorn src.api.bot_api:app --reload --port 8087
 ```
 
 Exposes `POST /move`, accepting FEN + Elo and returning a UCI move. Interactive docs: `http://localhost:8087/docs`
@@ -286,6 +293,7 @@ conda activate chess-env
 python scripts/run_vision.py
 ```
 Camera index is read from `CAMERA_INDEX` in your `.env` file (default: 0).
+You can also start and stop the camera from the dashboard once a game is active.
 
 ---
 
@@ -310,6 +318,29 @@ Trained weights may already be present in `data/models/`. On a clean checkout wi
 - Phase B: `python scripts/train_behavioral.py`
 
 Model files (`.pt`, `.onnx`) and the Lichess dataset (`.zst`) are excluded from git via `.gitignore`.
+
+## Generated Artifacts
+
+The repository intentionally separates source code from runtime artifacts:
+
+- `data/models/` stores trained weights and evaluation outputs.
+- `data/processed/` stores filtered Lichess JSONL files and tensor caches.
+- `data/pgn/` stores PGN files produced by live sessions.
+- `data/raw/_debug_warped_board.jpg` and `data/raw/test_run/` are generated debug outputs.
+- `__pycache__/` folders are generated Python bytecode caches.
+
+These files support local experimentation and debugging, but they are not core source files and are excluded from git where appropriate.
+
+## Verification
+
+The project includes smoke and regression scripts for each phase:
+
+- Vision: `python scripts/test_detector.py`, `python scripts/test_board_mapper.py`, `python scripts/test_motion.py`
+- Bot: `python scripts/test_model.py`, `python scripts/test_encoder.py`, `python scripts/test_move_service.py`
+- Graph: `python scripts/test_neo4j.py`, `python scripts/test_skill_tree.py`
+- Regression checks: `python scripts/test_regressions.py`
+
+Before a final delivery, run the relevant scripts in your environment to confirm local services, models, and external dependencies such as Neo4j and Stockfish are available.
 
 ---
 

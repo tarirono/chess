@@ -87,8 +87,8 @@
           <button class="btn btn-primary btn-sm flex-fill" onclick="newGame()">
             Start Game
           </button>
-          <button class="btn btn-warning btn-sm" id="camera-btn" title="Run scripts/run_vision.py in terminal" disabled>
-            📷 Camera (use Terminal)
+          <button class="btn btn-warning btn-sm" id="camera-btn" onclick="toggleCamera()" title="Start or stop the live camera pipeline">
+            Start Camera
          </button>
         </div>
         <div id="game-status" class="text-center mt-2 status-waiting small">
@@ -179,6 +179,7 @@ function checkDbStatus() {
       pill.className   = 'db-pill db-mock';
       pill.title       = data.neo4j ? data.neo4j.msg : 'unavailable';
     }
+    syncCameraUi(Boolean(data.camera && data.camera.active));
   })
   .catch(() => {
     const pill = document.getElementById('db-status');
@@ -257,25 +258,36 @@ function makeMove() {
 
 // ── Camera toggle ──────────────────────────────────────────────────
 function toggleCamera() {
-  cameraOn = !cameraOn;
-  const btn    = document.getElementById('camera-btn');
-  const status = document.getElementById('camera-status');
-
-  if (cameraOn) {
+  if (!cameraOn) {
     fetch('/api/camera/start', {method: 'POST'})
     .then(r => r.json())
     .then(d => {
-      if (d.error) { cameraOn = false; status.textContent = 'Camera: error'; return; }
-      btn.classList.add('camera-active');
-      status.textContent = 'Camera: active — moves auto-detected';
-      status.style.color = '#5cb85c';
-      pollTimer = setInterval(pollState, 1500);
+      if (d.error) { syncCameraUi(false, 'Camera: error'); return; }
+      syncCameraUi(Boolean(d.camera_active));
     });
   } else {
-    fetch('/api/camera/stop', {method: 'POST'});
+    fetch('/api/camera/stop', {method: 'POST'})
+    .then(() => syncCameraUi(false))
+    .catch(() => syncCameraUi(false));
+  }
+}
+
+function syncCameraUi(active, message) {
+  cameraOn = active;
+  const btn = document.getElementById('camera-btn');
+  const status = document.getElementById('camera-status');
+
+  if (active) {
+    btn.classList.add('camera-active');
+    btn.textContent = 'Stop Camera';
+    status.textContent = message || 'Camera: active - moves auto-detected';
+    status.style.color = '#5cb85c';
+    if (!pollTimer) pollTimer = setInterval(pollState, 1500);
+  } else {
     btn.classList.remove('camera-active');
-    status.textContent = 'Camera: off';
-    status.style.color = '#888';
+    btn.textContent = 'Start Camera';
+    status.textContent = message || 'Camera: off';
+    status.style.color = message === 'Camera: error' ? '#e05050' : '#888';
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   }
 }
@@ -310,6 +322,9 @@ function moveClassBadge(cls) {
 
 function updateUI(state) {
   initBoard(state.fen);
+  if (typeof state.camera_active === 'boolean') {
+    syncCameraUi(state.camera_active);
+  }
 
   document.getElementById('turn-indicator').textContent =
     state.turn === 'white' ? '⬜ White to move' : '⬛ Black to move';

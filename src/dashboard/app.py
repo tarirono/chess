@@ -57,6 +57,7 @@ def status():
 
     return jsonify({
         "neo4j":   {"ok": neo4j_ok, "msg": neo4j_msg},
+        "camera":  {"active": bool(manager and manager.is_vision_running())},
         "version": "1.0.0",
     })
 
@@ -124,7 +125,11 @@ def camera_start():
         data         = request.get_json(force=True) or {}
         camera_index = int(data.get("camera_index", 0))
         manager.start_vision_thread(camera_index=camera_index)
-        return jsonify({"status": "camera started", "camera_index": camera_index})
+        return jsonify({
+            "status": "camera started",
+            "camera_index": camera_index,
+            "camera_active": manager.is_vision_running(),
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -135,7 +140,7 @@ def camera_stop():
     if manager is None:
         return jsonify({"error": "No active game"}), 400
     manager.stop_vision_thread()
-    return jsonify({"status": "camera stopped"})
+    return jsonify({"status": "camera stopped", "camera_active": False})
 
 
 # ------------------------------------------------------------------

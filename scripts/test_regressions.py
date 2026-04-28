@@ -10,6 +10,7 @@ import torch
 from src.api.move_service import MoveService
 from src.behavioral.encoder import NUM_MOVES, move_to_index
 from src.graph.skill_tagger import SkillTagger
+from src.graph.skill_tree import SkillTree
 
 
 class DummyModel:
@@ -65,7 +66,46 @@ def test_skill_tagger_distinguishes_structure_and_activity():
     assert "Outpost_control" in outpost_tags, outpost_tags
 
 
+class DummySkillDb:
+    def get_player_skill_profile(self, _player_id):
+        return [
+            {
+                "skill": "Fork",
+                "attempts": 6,
+                "successes": 5,
+                "irt_ability": 0.9,
+                "difficulty": 0.4,
+            },
+            {
+                "skill": "Endgame",
+                "attempts": 4,
+                "successes": 3,
+                "irt_ability": 0.6,
+                "difficulty": 0.5,
+            },
+        ]
+
+    def get_player_move_history(self, _player_id, limit=12):
+        return [
+            {"move_class": "best"},
+            {"move_class": "good"},
+            {"move_class": "good"},
+            {"move_class": "inaccuracy"},
+        ][:limit]
+
+
+def test_skill_tree_recommends_adaptive_bot_strength():
+    tree = SkillTree.__new__(SkillTree)
+    tree.db = DummySkillDb()
+
+    adaptive_elo, adaptive_bracket = tree.recommend_bot_bracket("adam", 1400)
+
+    assert adaptive_elo > 1400, (adaptive_elo, adaptive_bracket)
+    assert adaptive_bracket in {"1400", "1600"}, adaptive_bracket
+
+
 if __name__ == "__main__":
     test_move_service_samples_distribution()
     test_skill_tagger_distinguishes_structure_and_activity()
+    test_skill_tree_recommends_adaptive_bot_strength()
     print("Regression checks passed.")
