@@ -151,38 +151,39 @@ class EngineAnalyzer:
     # ------------------------------------------------------------------
 
     def _analyse(self,
-                 board: chess.Board,
-                 move:  chess.Move) -> MoveAnalysis:
+             board: chess.Board,
+             move:  chess.Move) -> MoveAnalysis:
         limit = chess.engine.Limit(depth=self._depth)
 
-        # Score before the move (with best move)
-        info_pre = self._engine.analyse(board, limit, multipv=1)
+        # FIX: avec multipv=1, python-chess retourne une liste → prendre [0]
+        info_pre_raw = self._engine.analyse(board, limit, multipv=1)
+        info_pre = info_pre_raw[0] if isinstance(info_pre_raw, list) else info_pre_raw
+
         best_move_obj = info_pre.get("pv", [None])[0]
         best_move_uci = best_move_obj.uci() if best_move_obj else None
 
         score_pre = info_pre["score"].white()
         cp_pre    = self._score_to_cp(score_pre)
 
-        # Score after the move
+        # Score après le coup
         board_after = board.copy()
         board_after.push(move)
-        info_post = self._engine.analyse(board_after, limit)
+        info_post_raw = self._engine.analyse(board_after, limit)
+        info_post = info_post_raw[0] if isinstance(info_post_raw, list) else info_post_raw
+
         score_post = info_post["score"].white()
         cp_post    = self._score_to_cp(score_post)
 
-        # CP loss from the moving player's perspective
+        # CP loss depuis la perspective du joueur qui bouge
         if board.turn == chess.WHITE:
             cp_loss = cp_pre - cp_post
         else:
             cp_loss = cp_post - cp_pre
         cp_loss = max(0, cp_loss)
 
-        # Classification
         classification = self._classify(cp_loss)
-
-        # Tactical hints
         hints = self._tactical_hints(board, move, board_after,
-                                     best_move_obj, info_pre)
+                                    best_move_obj, info_pre)
 
         return MoveAnalysis(
             uci            = move.uci(),
@@ -192,7 +193,6 @@ class EngineAnalyzer:
             tactical_hints = hints,
             available      = True,
         )
-
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
