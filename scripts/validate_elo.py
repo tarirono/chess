@@ -74,9 +74,9 @@ STOCKFISH_PATH = _resolve_stockfish()
 
 # Opponent depth per bracket
 BRACKET_VS_DEPTH = {
-    "1200": 3,
-    "1400": 5,
-    "1600": 8,
+    "1200": 1,
+    "1400": 2,
+    "1600": 3,
 }
 
 BLUNDER_CP = 200
