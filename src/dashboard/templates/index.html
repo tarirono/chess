@@ -92,8 +92,14 @@
          </button>
         </div>
         <div id="game-status" class="text-center mt-2 status-waiting small">
-          No active game
-        </div>
+            <div id="elo-display" class="mt-1 text-center small" style="display:none">
+              <span style="color:#888">Your est. Elo: </span>
+              <span id="elo-estimate" style="color:#7eb8f7;font-weight:600">—</span>
+              &nbsp;·&nbsp;
+              <span style="color:#888">Bot adapting to: </span>
+              <span id="bot-elo-live" style="color:#5cb85c;font-weight:600">—</span>
+            </div>
+         </div>
         <!-- Error banner (shown when Neo4j is down) -->
         <div id="error-banner" class="mt-2 small text-warning" style="display:none"></div>
       </div>
@@ -367,6 +373,16 @@ function updateUI(state) {
         '</div>';
     }).join('');
   }
+  
+  if (state.bot_elo) {
+    document.getElementById('elo-display').style.display = 'block';
+    document.getElementById('bot-elo-live').textContent =
+      state.bot_elo + ' (' + (state.bot_bracket || '?') + ')';
+    const base = parseInt(document.getElementById('player-elo').value);
+    const delta = state.bot_elo - base;
+    document.getElementById('elo-estimate').textContent =
+      '~' + (base + Math.round(delta * 0.7));
+}
 }
 
 function refreshSkills() {

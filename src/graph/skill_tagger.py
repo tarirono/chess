@@ -101,28 +101,37 @@ class SkillTagger:
     # Quality classification
     # ------------------------------------------------------------------
 
-    def _classify_quality(self,
-                          board: chess.Board,
-                          move: chess.Move,
-                          board_after: chess.Board,
-                          analysis: MoveAnalysis | None) -> str | None:
-        """
-        Return "Blunder", "Mistake", "Inaccuracy", or None.
-        Engine-backed when analysis is present, heuristic otherwise.
-        """
-        if analysis:
-            mapping = {
-                "blunder":    "Blunder",
-                "mistake":    "Mistake",
-                "inaccuracy": "Inaccuracy",
-            }
+    def _classify_quality(self, board, move, board_after, analysis):
+        if analysis and analysis.available:
+            mapping = {"blunder": "Blunder", "mistake": "Mistake", "inaccuracy": "Inaccuracy"}
             return mapping.get(analysis.classification)
 
-        # ── Heuristic fallback ────────────────────────────────────────
+        # Heuristic fallback when Stockfish is unavailable
         if self._is_heuristic_blunder(board, move, board_after):
             return "Blunder"
-        return None
 
+        # Mistake: moving queen or rook onto a pawn-attacked square
+        piece = board.piece_at(move.from_square)
+        if piece and piece.piece_type in {chess.QUEEN, chess.ROOK}:
+            mover = board.turn
+            for sq in board_after.pieces(chess.PAWN, not mover):
+                if move.to_square in board_after.attacks(sq):
+                    return "Mistake"
+
+        # Inaccuracy: moving same piece twice in opening (tempo loss)
+        if board.fullmove_number <= 10 and len(board.move_stack) >= 2:
+            prev = board.peek()
+            if move.from_square == prev.to_square:
+                from_rank = chess.square_rank(move.from_square)
+                to_rank = chess.square_rank(move.to_square)
+                going_back = (
+                    (board.turn == chess.WHITE and to_rank < from_rank) or
+                    (board.turn == chess.BLACK and to_rank > from_rank)
+                )
+                if going_back:
+                    return "Inaccuracy"
+
+        return None
     # ------------------------------------------------------------------
     # Tactical pattern detectors
     # ------------------------------------------------------------------

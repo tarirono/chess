@@ -134,15 +134,21 @@ class MoveService:
         move = index_to_move(move_index)
 
         if move not in board.legal_moves:
-            move_q = chess.Move(move.from_square, move.to_square,
-                                promotion=chess.QUEEN)
+            move_q = chess.Move(move.from_square, move.to_square, promotion=chess.QUEEN)
             if move_q in board.legal_moves:
                 move = move_q
             else:
-                move = next(iter(board.legal_moves))
+                # Re-sample from top legal moves by probability instead of random fallback
+                legal_indices = [move_to_index(m) for m in board.legal_moves]
+                legal_probs = probs[torch.tensor(legal_indices)]
+                best_local = legal_indices[legal_probs.argmax().item()]
+                candidate = index_to_move(best_local)
+                move_q = chess.Move(candidate.from_square, candidate.to_square,
+                                    promotion=chess.QUEEN)
+                move = move_q if move_q in board.legal_moves else candidate
 
         return {
-            "uci":     move.uci(),
+            "uci": move.uci(),
             "bracket": bracket,
-            "conf":    round(conf, 4),
+            "conf": conf,
         }

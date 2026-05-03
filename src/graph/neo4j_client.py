@@ -41,20 +41,27 @@ class Neo4jClient:
         self._seed_skills()
 
     def _seed_skills(self):
-        skills = [
-            "Pin", "Fork", "Discovery", "Skewer",
-            "Checkmate_pattern", "Endgame", "Opening",
-            "Pawn_structure", "Doubled_pawns", "Isolated_pawn", "Passed_pawn",
-            "Piece_activity", "Development", "Centralization",
-            "Outpost_control", "Open_file_rook",
-            "Blunder","Mistake", "Inaccuracy",
+        from pathlib import Path
+        import json
+        diff_path = Path("data/models/skill_difficulties.json")
+        difficulties = {}
+        if diff_path.exists():
+            difficulties = json.loads(diff_path.read_text())
+
+        skills = list(difficulties.keys()) if difficulties else [
+            "Pin", "Fork", "Discovery", "Skewer", "Checkmate_pattern",
+            "Endgame", "Opening", "Pawn_structure", "Doubled_pawns",
+            "Isolated_pawn", "Passed_pawn", "Piece_activity", "Development",
+            "Centralization", "Outpost_control", "Open_file_rook",
+            "Blunder", "Mistake", "Inaccuracy",
         ]
         with self.driver.session() as s:
             for skill in skills:
+                diff = difficulties.get(skill, 0.5)
                 s.run(
                     "MERGE (sk:Skill {name: $name}) "
-                    "ON CREATE SET sk.difficulty = 0.5, sk.created_at = $ts",
-                    name=skill, ts=datetime.now().isoformat()
+                    "ON CREATE SET sk.difficulty = $diff, sk.created_at = $ts",
+                    name=skill, diff=diff, ts=datetime.now().isoformat()
                 )
 
     # ------------------------------------------------------------------

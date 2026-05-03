@@ -272,6 +272,24 @@ class GameManager:
             self.pgn_moves.append(bot_san)
             self.move_count += 1
 
+            # Record bot move in Phase C graph
+            try:
+                board_before_bot = self.board.copy()
+                board_before_bot.pop()
+                bot_skills = self.skill_tree.tagger.tag_position(board_before_bot, bot_move)
+                self.skill_tree.db.record_move(
+                    game_id=self.game_id,
+                    move_number=self.move_count,
+                    uci=bot_uci,
+                    fen_before=board_before_bot.fen(),
+                    skills_present=bot_skills,
+                    player_found_best=False,
+                    cp_loss=None,
+                    move_class="bot",
+                )
+            except Exception as e:
+                print(f"  [warn] Bot move not recorded in graph: {e}")
+
             print(f"  Bot move {self.move_count}: {bot_uci} ({bot_san})")
 
             return {
@@ -285,8 +303,7 @@ class GameManager:
         except Exception as e:
             print(f"  Bot API error: {e}")
             return {"error": str(e)}
-
-    # ------------------------------------------------------------------
+     # ------------------------------------------------------------------
     # Game over
     # ------------------------------------------------------------------
 

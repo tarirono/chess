@@ -9,6 +9,8 @@ but the dashboard and game flow work exactly as normal.
 """
 
 from datetime import datetime
+from pathlib import Path
+import json
 
 
 class MockNeo4jClient:
@@ -18,12 +20,15 @@ class MockNeo4jClient:
     """
 
     def __init__(self):
+        # Load calibrated skill difficulties
+        diff_path = Path("data/models/skill_difficulties.json")
+        self._skill_difficulties = {}
+        if diff_path.exists():
+            self._skill_difficulties = json.loads(diff_path.read_text())
+
         self._players:  dict = {}
         self._games:    dict = {}
         self._moves:    list = []
-        # Stores per-(player, skill): {attempts, successes, irt_ability, difficulty}
-        # Both irt_ability AND difficulty are now persisted so that
-        # update_irt_params() is not a no-op in mock mode.
         self._perf:     dict = {}
         self._skills:   list = [
             "Pin", "Fork", "Discovery", "Skewer",
@@ -101,7 +106,7 @@ class MockNeo4jClient:
                 "attempts":    0,
                 "successes":   0,
                 "irt_ability": 0.0,
-                "difficulty":  0.5,   # persisted so IRT updates accumulate
+                "difficulty":  self._skill_difficulties.get(skill_name, 0.5),  # ← calibrated
             }
         self._perf[key]["attempts"]  += 1
         self._perf[key]["successes"] += 1 if success else 0
@@ -116,16 +121,15 @@ class MockNeo4jClient:
             "attempts":    p["attempts"],
             "successes":   p["successes"],
             "irt_ability": p["irt_ability"],
-            "difficulty":  p["difficulty"],   # returns the live value, not hardcoded 0.5
+            "difficulty":  p["difficulty"],
         }
 
     def update_irt_params(self, player_id: str, skill_name: str,
                            new_ability: float, new_difficulty: float):
-        """Persist both IRT ability and difficulty (was only storing ability before)."""
         key = (player_id, skill_name)
         if key in self._perf:
             self._perf[key]["irt_ability"] = new_ability
-            self._perf[key]["difficulty"]  = new_difficulty   # FIX: was missing
+            self._perf[key]["difficulty"]  = new_difficulty
 
     # ------------------------------------------------------------------
     # Queries
