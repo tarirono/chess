@@ -274,8 +274,8 @@ class GameManager:
 
             # Record bot move in Phase C graph
             try:
-                board_before_bot = self.board.copy()
-                board_before_bot.pop()
+                board_before_bot = self.board.copy()  # save before push
+                self.board.push(bot_move)             # then push
                 bot_skills = self.skill_tree.tagger.tag_position(board_before_bot, bot_move)
                 self.skill_tree.db.record_move(
                     game_id=self.game_id,
