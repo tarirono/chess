@@ -88,9 +88,15 @@ def make_move():
     global manager
     if manager is None:
         return jsonify({"error": "No active game"}), 400
-    data  = request.get_json(force=True) or {}
-    uci   = data.get("uci", "")
-    state = manager.player_move(uci)
+    data = request.get_json(force=True) or {}
+    uci  = data.get("uci", "")
+    try:
+        state = manager.player_move(uci)
+    except Exception as e:
+        return jsonify({
+            "error": f"Move failed: {str(e)}",
+            "hint":  "Make sure the bot API is running: uvicorn src.api.bot_api:app --port 8087"
+        }), 500
     return jsonify(state)
 
 

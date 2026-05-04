@@ -31,8 +31,7 @@ class PieceDetector:
         Returns:
             List of dicts: { "label": str, "conf": float, "box": [x1,y1,x2,y2] }
         """
-        # BUG FIX: accept numpy arrays directly so VisionLoop never has to
-        # write a temp file. Ultralytics YOLO supports np.ndarray as source.
+        
         if isinstance(source, (str, Path)):
             inp = str(source)
         elif isinstance(source, np.ndarray):

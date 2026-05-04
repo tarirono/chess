@@ -128,6 +128,17 @@ class VisionLoop:
             test_board.push(move)
             if test_board.board_fen() == new_fen:
                 return move.uci()
+        # Promotion fallback: try all legal moves with queen promotion
+        for move in self.board.legal_moves:
+            if move.promotion:
+                continue  # already tried above
+            # Try queen promotion variant
+            promo = chess.Move(move.from_square, move.to_square, promotion=chess.QUEEN)
+            if promo in self.board.legal_moves:
+                test_board = self.board.copy()
+                test_board.push(promo)
+                if test_board.board_fen() == new_fen:
+                    return promo.uci()
         return None
 
     def _save_snapshot(self):
